@@ -123,6 +123,7 @@ export class Hud {
   private routes: Route[] = [];
   private selected = 0;
   private following = false;
+  private draggingHour = false;
   private traveller: TravelMode = 'astronaut';
   private toastTimer = 0;
 
@@ -274,8 +275,9 @@ export class Hud {
     });
     const hour = el<HTMLInputElement>(this.root, '#hour');
     hour.addEventListener('input', () => actions.setHour(Number(hour.value)));
-    // Let go of the slider once a time is picked, so it follows the running clock again.
-    hour.addEventListener('change', () => hour.blur());
+    // The slider follows the running clock except while it is being dragged; keyboard focus stays on it.
+    hour.addEventListener('pointerdown', () => { this.draggingHour = true; });
+    for (const done of ['pointerup', 'pointercancel', 'change']) hour.addEventListener(done, () => { this.draggingHour = false; });
     el<HTMLInputElement>(this.root, '#traverse').addEventListener('change', (event) => actions.setTraverseVisible((event.target as HTMLInputElement).checked));
     el(this.root, '#shelter-button').addEventListener('click', () => actions.shelter());
     el(this.root, '#near-route').addEventListener('click', () => this.nearStop && actions.routeToStop(this.nearStop));
@@ -430,7 +432,7 @@ export class Hud {
     set('#t-hour', time);
     set('#t-clock', `Sol ${t.sol} · ${time}:${String(Math.floor((t.hour * 3600) % 60)).padStart(2, '0')}`);
     const slider = el<HTMLInputElement>(this.root, '#hour');
-    if (document.activeElement !== slider) slider.value = String(t.hour);
+    if (!this.draggingHour) slider.value = String(t.hour);
     const guidance = el(this.root, '#guidance');
     guidance.hidden = !t.guidance;
     set('#guidance', t.guidance);
