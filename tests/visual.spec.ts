@@ -91,6 +91,9 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   expect(oxygen.at(-1)!).toBeLessThan(100);
   expect(oxygen.at(-1)!).toBeGreaterThan(40);
   await expect(page.locator('#checklist .rules li').first()).toContainText(/If suit energy is below \d+ % at Checkpoint 1/);
+  // Oxygen outlasts suit energy, so the same abort point reads higher on the oxygen gauge.
+  const rule = (await page.locator('#checklist .rules li').first().textContent())!.match(/energy is below (\d+) %.*oxygen below (\d+) %/)!;
+  expect(Number(rule[2])).toBeGreaterThanOrEqual(Number(rule[1]));
   await page.locator('#checklist [data-sheet="close"]').last().click();
   await expect(page.locator('#checklist')).toBeHidden();
 

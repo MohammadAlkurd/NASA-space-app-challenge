@@ -53,8 +53,8 @@ export function abortRules(route: Route, rows: ChecklistRow[]): string[] {
       continue;
     }
     // Oxygen and water are used in step with effort, so the same rule can be read off any of the three gauges.
-    const need = suitSupplies((row.goOnPct / 100) * SUIT_ENERGY_J);
-    rules.push(`If suit energy is below ${row.goOnPct} % at ${row.name} (${row.clock}), ${then}. The same point on the other gauges: oxygen below ${Math.ceil((1 - need.oxygen) * 100)} % or cooling water below ${Math.ceil((1 - need.water) * 100)} %.`);
+    const need = suitSupplies((1 - row.goOnPct / 100) * SUIT_ENERGY_J);
+    rules.push(`If suit energy is below ${row.goOnPct} % at ${row.name} (${row.clock}), ${then}. The same point on the other gauges: oxygen below ${Math.ceil(need.oxygen * 100)} % or cooling water below ${Math.ceil(need.water * 100)} %.`);
   }
   if (trip.turnBack) rules.push(`Do not go past the turn-back point at ${(trip.turnBackM / 1000).toFixed(2)} km: beyond it the walk home breaks the suit-energy rule or the ${MODEL.shelterWalk.value} min shelter rule.`);
   if (!rover) rules.push(`If the suit CO₂ scrubber fails, walk to the nearest shelter at once. "Shelter walk" is how long that takes at ${MODEL.shelterPace.value} km/h; NASA tested ${MODEL.shelterWalk.value} min.`);
