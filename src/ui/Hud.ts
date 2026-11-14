@@ -415,7 +415,7 @@ export class Hud {
     planner.innerHTML = `${tools}
       <div class="routes">${cards}</div>
       ${timingLine}
-      ${warnings ? `<ul class="warnings">${warnings}</ul>` : '<p class="hint ok">Whole route is rated safe.</p>'}
+      ${warnings ? `<ul class="warnings">${warnings}</ul>` : '<p class="hint ok">The ground on the whole route is rated safe.</p>'}
       <div class="row">
         ${this.following ? '<button data-action="stop" class="primary">Stop</button>' : '<button data-action="go" class="primary">Go</button>'}
         ${drawing ? '<button data-action="undo">Undo point</button><button data-action="finish">Compare with safe routes</button>' : ''}

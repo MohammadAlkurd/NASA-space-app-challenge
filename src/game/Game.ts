@@ -67,6 +67,7 @@ export class Game {
   private destination: RoutePoint | null = null;
   private base: RoutePoint = { x: 0, z: 0 };
   private scenario: Scenario = 'clear';
+  private readonly fogDay = new THREE.Color(DUST_COLOR);
   private conditions: Conditions | null = null;
   private drawPoints: RoutePoint[] = [];
   private lastBase: BaseScore | null = null;
@@ -510,8 +511,10 @@ export class Game {
     const daylight = THREE.MathUtils.smoothstep(weather.sunElevationDeg, -6, 8);
     const dustDim = this.conditions.haze > 1 ? 0.35 : 1;
     this.sky.sun.intensity = (1.2 + 2.4 * Math.sin(THREE.MathUtils.degToRad(Math.max(7, weather.sunElevationDeg)))) * daylight * dustDim;
-    this.sky.ambient.intensity = 1.15 * (0.12 + 0.88 * daylight) * (dustDim < 1 ? 0.7 : 1);
-    this.renderer.toneMappingExposure = 1 * (0.3 + 0.7 * daylight);
+    this.sky.ambient.intensity = 1.15 * (0.3 + 0.7 * daylight) * (dustDim < 1 ? 0.7 : 1);
+    this.renderer.toneMappingExposure = 1.05 * (0.5 + 0.5 * daylight);
+    this.sky.setDaylight(daylight);
+    (this.scene.fog as THREE.FogExp2).color.copy(this.fogDay).multiplyScalar(0.04 + 0.96 * daylight);
 
     if (this.traveller === 'rover') this.rover.mastCamera.getWorldPosition(this.eye);
     else this.eye.copy(this.astronaut.eye);

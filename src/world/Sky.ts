@@ -22,6 +22,7 @@ export class Sky {
         uSunDir: { value: this.sunDirection },
         uHorizon: { value: HORIZON },
         uZenith: { value: ZENITH },
+        uDay: { value: 1 },
       },
       vertexShader: /* glsl */ `
         varying vec3 vDir;
@@ -34,6 +35,7 @@ export class Sky {
         uniform vec3 uSunDir;
         uniform vec3 uHorizon;
         uniform vec3 uZenith;
+        uniform float uDay;
         varying vec3 vDir;
         void main() {
           vec3 dir = normalize(vDir);
@@ -45,6 +47,8 @@ export class Sky {
           color += vec3(0.30, 0.27, 0.24) * pow(toSun, 6.0);
           color += vec3(0.55, 0.62, 0.72) * pow(toSun, 90.0);
           color += vec3(4.0, 3.8, 3.5) * smoothstep(0.99990, 0.99996, toSun);
+          // Night: the dust sky fades to a faint blue-grey.
+          color = mix(vec3(0.012, 0.014, 0.02), color, uDay);
           gl_FragColor = vec4(color, 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -78,6 +82,11 @@ export class Sky {
       Math.sin(elevation),
       -Math.cos(azimuth) * Math.cos(elevation),
     );
+  }
+
+  /** 1 in full daylight, 0 at night. */
+  setDaylight(day: number): void {
+    this.material.uniforms.uDay.value = day;
   }
 
   /** Keep the dome on the camera and the shadow box on the point of interest. */
