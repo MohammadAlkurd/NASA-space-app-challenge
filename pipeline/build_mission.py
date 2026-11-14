@@ -219,7 +219,9 @@ def build_thermal(site, meta, out_dir):
         # The global mosaic uses the same projection but longitudes in -180..180 (x from -R*pi).
         circumference = 2 * math.pi * MARS_R
         x = cx if cx <= src.bounds.right else cx - circumference
-        window = from_bounds(x - half, cy - half, x + half, cy + half, src.transform)
+        # Same footprint as the terrain crop: the source grid is stretched east-west by 1 / cos(lat).
+        half_x = half / meta["cosLat"]
+        window = from_bounds(x - half_x, cy - half, x + half_x, cy + half, src.transform)
         data = src.read(1, window=window, out_shape=(256, 256), resampling=Resampling.cubic)
     lo, hi = np.percentile(data, [1, 99])
     scaled = np.clip((data.astype(np.float32) - lo) / max(hi - lo, 1) * 255, 0, 255).astype(np.uint8)
