@@ -1,25 +1,25 @@
 # Mars Base Explorer
 
-A layered Marswalk planner for Jezero Crater, built on real NASA data, for the NASA Space Apps Challenge 2026:
+A layered Marswalk planner for Jezero Crater and Gale Crater, built on real NASA data, for the NASA Space Apps Challenge 2026:
 **Interplanetary Survival Guide: Martian Map**.
 
 Click anywhere on a 5 km × 5 km piece of Mars and get safe routes for an astronaut on foot or a crew rover, rated
 stretch by stretch (Safe / Be careful / Danger / No-go) with the reason. Switch data layers to see why: slopes,
 elevation, radiation shelter, heat. Walk or drive the route in 3D with a helmet display showing weather, radiation
-dose and suit time. Visit nine real Perseverance science stops and see the photo the rover took at each one.
+dose and suit energy. Visit the real science stops of Perseverance (Jezero) or Curiosity (Gale) and see the photo the rover took at each one.
 
 ## How it answers the challenge
 
 | The challenge asks for | In this project |
 | --- | --- |
-| Layered, integrated view of a Martian location from multiple NASA missions | Five switchable layers over Jezero from Mars Reconnaissance Orbiter, Mars Odyssey, Mars Global Surveyor, Curiosity and Perseverance |
+| Layered, integrated view of a Martian location from multiple NASA missions | Switchable layers over two landing sites you can walk, Jezero and Gale, from Mars Reconnaissance Orbiter, Mars Odyssey, Mars Global Surveyor, Curiosity and Perseverance |
 | At least three kinds of data | Optical (HiRISE), topographic (HiRISE/MOLA), thermal (THEMIS), atmospheric (MEDA), radiation (RAD, DONKI) |
 | Astronaut safety, radiation and space weather | Dose rate and trip dose, shelter layer, low-radiation route, DONKI solar-storm status, suit-time budget, slope limits |
 | Suit mobility, route planning around obstacles | Separate limits for astronaut and rover; A* planner avoids no-go slopes; every risky stretch is explained |
-| Route map to science objectives | Real Perseverance sampling sites; the Science-rich route visits those on the way |
-| Point-of-view imagery from surface missions | Perseverance Navcam photo at each stop, with credit and link |
+| Route map to science objectives | Real Perseverance and Curiosity science stops; the Science-rich route visits those on the way |
+| Point-of-view imagery from surface missions | The rover's own Navcam photo at each stop, with credit and link |
 | Habitat planning display or helmet HUD | Map view (planning table) and ground view (helmet display with guidance) |
-| Robotic support | Crew-rover mode with battery budget; Perseverance's real traverse as a layer |
+| Robotic support | Crew-rover mode with battery budget; the real Perseverance or Curiosity traverse as a layer |
 
 Full checklist: [docs/challenge-checklist.md](docs/challenge-checklist.md).
 
