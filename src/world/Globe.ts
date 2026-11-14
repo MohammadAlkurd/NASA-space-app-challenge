@@ -82,6 +82,7 @@ export class Globe {
   private readonly disposables: { dispose(): void }[] = [];
   private longitude = SITES[0].lon - 38;
   private latitude = 14;
+  private zoomPast = 1;
   private distance = 3.3;
   private dive = -1;
   private readonly sun = new THREE.DirectionalLight('#fff1e0', 3.2);
@@ -193,9 +194,13 @@ export class Globe {
   /** Wheel or pinch. Returns true when the user keeps zooming in past the closest view. */
   zoom(factor: number): boolean {
     if (this.diving) return false;
-    const wanted = this.zoomFactor * factor;
-    this.zoomFactor = THREE.MathUtils.clamp(wanted, 0.5, 1.5);
-    return wanted < 0.42;
+    const closest = this.zoomFactor <= 0.5;
+    this.zoomFactor = THREE.MathUtils.clamp(this.zoomFactor * factor, 0.5, 1.5);
+    // Zooming in while already at the closest view adds up, so small wheel steps and slow pinches count.
+    this.zoomPast = factor < 1 && closest ? this.zoomPast * factor : 1;
+    if (this.zoomPast > 0.7) return false;
+    this.zoomPast = 1;
+    return true;
   }
 
   /** The landing site under a click, if any. Site dots are small, so the nearest within 30 px counts. */
