@@ -21,12 +21,13 @@ export interface RouteTiming {
 
 const STEP_H = 0.25;
 
-function sample(environment: Environment, startHour: number, durationS: number) {
+function sample(environment: Environment, startHour: number, durationS: number, stepH = STEP_H) {
   // Hours of the Mars clock, which the weather table and the mission clock both use.
   const hours = durationS / HOUR_SECONDS;
   let minAirC = Infinity;
   let maxAirC = -Infinity;
   let minSunDeg = Infinity;
+  let maxSunDeg = -Infinity;
   let darkH = 0;
   let coldH = 0;
   // Walk the trip in steps that end exactly at arrival, so a short trip and the last part of a long one are both checked.
@@ -35,10 +36,11 @@ function sample(environment: Environment, startHour: number, durationS: number) 
     minAirC = Math.min(minAirC, weather.airTempC);
     maxAirC = Math.max(maxAirC, weather.airTempC);
     minSunDeg = Math.min(minSunDeg, weather.sunElevationDeg);
+    maxSunDeg = Math.max(maxSunDeg, weather.sunElevationDeg);
   };
   note(before);
-  for (let t = 0; t < hours - 1e-9; t += STEP_H) {
-    const span = Math.min(STEP_H, hours - t);
+  for (let t = 0; t < hours - 1e-9; t += stepH) {
+    const span = Math.min(stepH, hours - t);
     const after = environment.at((startHour + t + span) % 24);
     note(after);
     // A stretch counts as dark or cold when either end of it is.
@@ -46,7 +48,7 @@ function sample(environment: Environment, startHour: number, durationS: number) 
     if (Math.min(before.airTempC, after.airTempC) < -65) coldH += span;
     before = after;
   }
-  return { minAirC, maxAirC, minSunDeg, darkH, coldH };
+  return { minAirC, maxAirC, minSunDeg, maxSunDeg, darkH, coldH };
 }
 
 /** Lower is better: darkness dominates, then deep cold, then how cold the coldest moment is. */
@@ -64,7 +66,8 @@ export function clock(hour: number): string {
 export function timeRoute(
   environment: Environment, scenario: Scenario, startHour: number, durationS: number, doseUSv: number,
 ): RouteTiming {
-  const s = sample(environment, startHour, durationS);
+  // Five-minute steps for the trip being shown; the search for a better hour uses the coarser default.
+  const s = sample(environment, startHour, durationS, 1 / 12);
   const endHour = (startHour + durationS / HOUR_SECONDS) % 24;
   const now = assess(scenario, environment.at(startHour), environment.spaceWeather);
   const warnings: string[] = [];
@@ -73,7 +76,7 @@ export function timeRoute(
   if (scenarioReason) warnings.push(scenarioReason);
   if (s.darkH > 0 || s.minSunDeg < 5) {
     verdict = 'NO-GO';
-    warnings.push(s.darkH * HOUR_SECONDS >= durationS - 1
+    warnings.push(s.maxSunDeg < 5
       ? 'The whole trip is in the dark: you cannot see rocks or slopes.'
       : `About ${Math.max(1, Math.round((s.darkH * HOUR_SECONDS) / 60))} min of this trip is in the dark.`);
   } else if (s.minSunDeg < 15) {
