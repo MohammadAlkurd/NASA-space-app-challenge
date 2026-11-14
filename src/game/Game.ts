@@ -436,7 +436,12 @@ export class Game {
   /** Walk the crew to the airlock; the switch to the rover happens when they step in. */
   private board(camp: boolean): void {
     this.stopFollowing();
+    // Keep a trip planned on foot, so it is re-planned for the rover once aboard; a route that only led to the rover is done.
+    const trip = !camp && this.destination && Math.hypot(this.destination.x - this.rover.position.x, this.destination.z - this.rover.position.z) > BOARD_RANGE
+      ? this.destination
+      : null;
     this.clearRoutes();
+    this.destination = trip;
     this.transfer = { boarding: true, camp, to: this.rover.hatch(new THREE.Vector3()) };
     this.rover.setDoor(true);
   }
