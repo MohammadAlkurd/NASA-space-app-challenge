@@ -53,6 +53,8 @@ export interface HudActions {
   routeToStop(stop: Stop): void;
   findBestBase(): void;
   routeToBase(): void;
+  setBaseHere(): void;
+  returnToBase(): void;
 }
 
 const LAYERS: { id: LayerId; name: string; source: string; legend: string }[] = [
@@ -316,7 +318,8 @@ export class Hud {
         <li><div><b>${c.name}</b><span>${c.score.toFixed(0)}</span></div>
         <div class="meter"><div style="width:${c.score}%"></div></div>
         <p class="muted small">${escapeHtml(c.note)}</p></li>`).join('')}</ul>
-      <button class="primary" data-route>Route here</button>`;
+      <div class="row"><button class="primary" data-setbase>Set base here</button><button data-route>Route here</button></div>`;
+    card.querySelector('[data-setbase]')?.addEventListener('click', () => this.actions.setBaseHere());
     card.querySelector('[data-close]')?.addEventListener('click', () => (card.hidden = true));
     card.querySelector('[data-route]')?.addEventListener('click', () => {
       card.hidden = true;
@@ -345,7 +348,7 @@ export class Hud {
         <button data-tool="base" class="${this.tool === 'base' ? 'active' : ''}">Base site</button>
       </div>`;
     if (this.tool === 'base') {
-      planner.innerHTML = `${tools}<p class="hint">Click any spot to score it as a base site.</p>
+      planner.innerHTML = `${tools}<p class="hint">Click any spot to score it, then set your base there. Walks start from the base.</p>
         <div class="row"><button data-action="best" class="primary">Find the best site</button></div>`;
       return;
     }
@@ -353,7 +356,8 @@ export class Hud {
     if (!routes.length) {
       planner.innerHTML = this.tool === 'draw'
         ? `${tools}<p class="hint">Click the ground to add points. Each stretch is checked as you draw.</p>`
-        : `${tools}<p class="hint">Click the ground or a blue science stop to get safe routes.</p>`;
+        : `${tools}<p class="hint">Click the ground or a blue science stop to get safe routes.</p>
+          <div class="row"><button data-action="home">Route back to base</button></div>`;
       return;
     }
     const route = routes[this.selected];
@@ -401,6 +405,7 @@ export class Hud {
       case 'geojson': return this.actions.exportRoute('geojson');
       case 'csv': return this.actions.exportRoute('csv');
       case 'best': return this.actions.findBestBase();
+      case 'home': return this.actions.returnToBase();
       default:
     }
   }

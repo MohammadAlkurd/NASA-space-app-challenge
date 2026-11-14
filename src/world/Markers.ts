@@ -66,6 +66,7 @@ export class Markers {
   private readonly pins = new THREE.Group();
   private readonly lineMaterials: LineMaterial[] = [];
   private readonly destination: THREE.Group;
+  private readonly base = new THREE.Group();
   private readonly you: THREE.Mesh;
 
   constructor(private readonly site: SiteData, readonly mission: Mission) {
@@ -85,6 +86,12 @@ export class Markers {
     this.you.renderOrder = 30;
     this.you.visible = false;
     this.group.add(this.you);
+    const baseLabel = labelSprite('BASE', '#f0a23b');
+    baseLabel.position.y = 30;
+    this.base.add(this.pin('#f0a23b', 1.2), baseLabel);
+    this.base.userData.label = baseLabel;
+    this.base.userData.labelSize = baseLabel.scale.clone();
+    this.group.add(this.base);
     this.destination = this.pin('#ffffff');
     this.destination.visible = false;
     this.group.add(this.destination);
@@ -103,6 +110,10 @@ export class Markers {
     });
     const route = routes[selected];
     if (route) this.routes.add(this.line(route.points, (k) => RATING_COLORS[route.ratings[k]], 6, 1.6));
+  }
+
+  setBase(point: RoutePoint): void {
+    this.base.position.set(point.x, this.site.groundAt(point.x, point.z), point.z);
   }
 
   setDestination(point: RoutePoint | null): void {
@@ -140,6 +151,8 @@ export class Markers {
       label.visible = mapView || beacon.position.distanceTo(camera.position) < 1300;
     }
     this.destination.scale.setScalar(scale);
+    this.base.scale.setScalar(scale);
+    (this.base.userData.label as THREE.Sprite).scale.copy(this.base.userData.labelSize as THREE.Vector3).divideScalar(scale);
     for (const pin of this.pins.children) pin.scale.setScalar(scale);
   }
 

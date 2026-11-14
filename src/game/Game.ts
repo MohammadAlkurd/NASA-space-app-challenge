@@ -63,6 +63,7 @@ export class Game {
   private followDistance = 0;
   private followLengths: number[] = [];
   private destination: RoutePoint | null = null;
+  private base: RoutePoint = { x: 0, z: 0 };
   private drawPoints: RoutePoint[] = [];
   private lastBase: BaseScore | null = null;
   private doseTotal = 0;
@@ -99,6 +100,8 @@ export class Game {
       routeToStop: (stop) => this.planTo(stop),
       findBestBase: () => this.showBase(this.scorer.findBest(), true),
       routeToBase: () => this.lastBase && this.planTo(this.lastBase),
+      setBaseHere: () => this.lastBase && this.setBase(this.lastBase),
+      returnToBase: () => this.planTo(this.base),
     }, `${import.meta.env.BASE_URL}data/jezero/`);
     this.globe = new Globe(`${import.meta.env.BASE_URL}data/globe/`);
     window.addEventListener('resize', this.onResize);
@@ -139,6 +142,8 @@ export class Game {
     // Start where Perseverance landed, the rover parked and the astronaut beside it.
     const landing = mission.stops[0];
     this.rover.place(landing.x, landing.z, -Math.PI / 2);
+    this.base = { x: landing.x, z: landing.z };
+    this.markers.setBase(this.base);
     this.astronaut.place(landing.x - 4, landing.z + 5, -Math.PI / 2);
     this.lastPosition.copy(this.astronaut.position);
     this.rig.distance = 11;
@@ -328,6 +333,23 @@ export class Game {
       const worse = RATINGS.indexOf(custom.stats.worst) > RATINGS.indexOf(safest.stats.worst);
       this.hud.toast(worse ? `Your route is rated ${custom.stats.worst}. The Safest route avoids that.` : 'Your route is as safe as the planner\'s. Nice work.');
     }
+  }
+
+  /** Move the base (and the parked rover) here and start a fresh walk from it. */
+  private setBase(point: RoutePoint): void {
+    this.clearRoutes();
+    this.base = { x: point.x, z: point.z };
+    this.markers.setBase(this.base);
+    this.rover.place(point.x, point.z, this.rover.heading);
+    this.astronaut.place(point.x - 4, point.z + 5, this.astronaut.heading);
+    this.lastPosition.copy(this.active.position);
+    this.doseTotal = 0;
+    this.suitSeconds = 0;
+    this.energyWh = 0;
+    this.hud.hideCard();
+    this.hud.toast('Base set here. Suit time, battery and dose are reset for a new walk.');
+    if (this.rig.mode === 'map') this.frameAround(this.base, 500);
+    this.pushTelemetry();
   }
 
   private showBase(score: BaseScore, focus = false): void {
