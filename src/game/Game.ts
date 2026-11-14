@@ -3,6 +3,7 @@ import { CameraRig, type CameraMode } from '../core/CameraRig';
 import { Input } from '../core/Input';
 import { Loop } from '../core/Loop';
 import { createRenderer } from '../core/Renderer';
+import { assess, type Conditions, type Scenario } from '../data/Conditions';
 import { Environment, SOL_SECONDS } from '../data/Environment';
 import { Astronaut } from '../entities/Astronaut';
 import type { Explorer, TravelMode } from '../entities/Explorer';
@@ -64,6 +65,8 @@ export class Game {
   private followLengths: number[] = [];
   private destination: RoutePoint | null = null;
   private base: RoutePoint = { x: 0, z: 0 };
+  private scenario: Scenario = 'clear';
+  private conditions: Conditions | null = null;
   private drawPoints: RoutePoint[] = [];
   private lastBase: BaseScore | null = null;
   private doseTotal = 0;
@@ -420,7 +423,7 @@ export class Game {
     const explorer = this.active;
     const profile = explorer.profile;
     const cell = this.analysis.index(explorer.position.x, explorer.position.z);
-    const speed = profile.speed * speedFactor(this.analysis.effectiveSlope(cell), profile) * this.timeScale;
+    const speed = profile.speed * speedFactor(this.analysis.effectiveSlope(cell), profile) * this.timeScale * (this.conditions?.speedFactor ?? 1);
     this.followDistance += speed * dt;
     const total = lengths[lengths.length - 1];
     if (this.followDistance >= total) {
@@ -482,14 +485,16 @@ export class Game {
       const manual = this.input.throttle !== 0 || this.input.steer !== 0;
       if (this.following && manual) this.stopFollowing();
       if (this.following) this.followStep(dt);
-      else explorer.update({ throttle: this.input.throttle, steer: this.input.steer }, dt, this.timeScale);
+      else explorer.update({ throttle: this.input.throttle, steer: this.input.steer }, dt, this.timeScale * (this.conditions?.speedFactor ?? 1));
       if (explorer.blocked && manual) this.hud.toast(`Too steep ahead: over the ${explorer.profile.maxSlope}° limit. Back up and go around.`);
       this.account(dt);
     }
 
     const weather = this.environment.at(this.hour);
     this.sky.setSun(Math.max(7, weather.sunElevationDeg), weather.sunAzimuthDeg);
-    this.sky.sun.intensity = 1.2 + 2.4 * Math.sin(THREE.MathUtils.degToRad(Math.max(7, weather.sunElevationDeg)));
+    this.conditions = assess(this.scenario, weather, this.environment.spaceWeather);
+    (this.scene.fog as THREE.FogExp2).density = 0.00011 * this.conditions.haze;
+    this.sky.sun.intensity = (1.2 + 2.4 * Math.sin(THREE.MathUtils.degToRad(Math.max(7, weather.sunElevationDeg)))) / (this.conditions.haze > 1 ? 3 : 1);
 
     if (this.traveller === 'rover') this.rover.mastCamera.getWorldPosition(this.eye);
     else this.eye.copy(this.astronaut.eye);
@@ -523,7 +528,7 @@ export class Game {
       this.hud.toast('Sunset is near: head back to base. Night falls to about -75 °C.');
     }
     const cell = this.analysis.index(explorer.position.x, explorer.position.z);
-    this.doseTotal += (doseRate(this.analysis.skyView[cell]) * missionSeconds) / 3600;
+    this.doseTotal += (doseRate(this.analysis.skyView[cell]) * (this.conditions?.doseFactor ?? 1) * missionSeconds) / 3600;
     const moved = Math.hypot(explorer.position.x - this.lastPosition.x, explorer.position.z - this.lastPosition.z);
     if (this.traveller === 'astronaut') this.suitSeconds += missionSeconds;
     else this.energyWh += roverEnergyWh(moved, explorer.position.y - this.lastPosition.y);
