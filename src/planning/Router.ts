@@ -286,6 +286,7 @@ export class Router {
       if (c === s) break;
     }
     cells.reverse();
+    if (cells.length < 2) return [{ x: start.x, z: start.z }, { x: goal.x, z: goal.z }];
     const points = cells.map((c) => analysis.cellCenter(c, { x: 0, z: 0 }));
     points[0] = { x: start.x, z: start.z };
     points[points.length - 1] = { x: goal.x, z: goal.z };
