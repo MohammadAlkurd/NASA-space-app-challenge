@@ -1,3 +1,4 @@
+import { clock, type RouteTiming } from '../planning/Timeline';
 import type { TravelMode } from '../entities/Explorer';
 import type { LayerId } from '../planning/Analysis';
 import type { BaseScore } from '../planning/BaseSite';
@@ -140,7 +141,7 @@ export class Hud {
         </div>
         <div class="clock">
           <label for="hour">Local time <b id="t-hour"></b></label>
-          <input id="hour" type="range" min="6" max="18" step="0.25" value="10" />
+          <input id="hour" type="range" min="0" max="23.75" step="0.25" value="10" />
           <div class="segmented small" id="speed">
             <button data-scale="1">Real time</button>
             <button data-scale="5">×5</button>
@@ -297,7 +298,8 @@ export class Hud {
     this.renderPlanner();
   }
 
-  setRoutes(routes: Route[], selected: number, following: boolean): void {
+  setRoutes(routes: Route[], selected: number, following: boolean, timings: RouteTiming[] = []): void {
+    this.timings = timings;
     this.routes = routes;
     this.selected = selected;
     this.following = following;
@@ -362,6 +364,8 @@ export class Hud {
     this.toastTimer = window.setTimeout(() => (toast.hidden = true), 4200);
   }
 
+  private timings: RouteTiming[] = [];
+
   private renderPlanner(): void {
     const planner = el(this.root, '#planner');
     const tools = `
@@ -391,7 +395,7 @@ export class Hud {
         <b>${r.label}</b>
         <span class="chip" style="--tone:${RATING_COLORS[r.stats.worst]}">${r.stats.worst}</span>
         <span>${formatDuration(r.stats.durationS)} · ${(r.stats.distanceM / 1000).toFixed(2)} km</span>
-        <span>${resource} · ${r.stats.doseUSv.toFixed(1)} µSv</span>
+        <span>${resource} · ${(this.timings[index]?.doseUSv ?? r.stats.doseUSv).toFixed(1)} µSv</span>
         <span>max slope ${r.stats.maxSlopeDeg.toFixed(0)}° · climb ${r.stats.ascentM.toFixed(0)} m</span>
         ${r.stops.length ? `<span class="science">via ${r.stops.map(escapeHtml).join(', ')}</span>` : ''}
       </button>`;
@@ -401,8 +405,16 @@ export class Hud {
       .sort((a, b) => severity(b.rating) - severity(a.rating) || b.lengthM - a.lengthM).slice(0, 3)
       .map((s) => `<li style="--tone:${RATING_COLORS[s.rating]}"><b>${s.rating}</b> for ${Math.max(10, Math.round(s.lengthM / 10) * 10)} m: ${escapeHtml(s.reason)}</li>`).join('');
     const drawing = this.tool === 'draw';
+    const timing = this.timings[this.selected];
+    const tone = timing?.verdict === 'NO-GO' ? '#ff3b3b' : timing?.verdict === 'GO WITH CARE' ? '#ffd23f' : '#3ddc84';
+    const timingLine = timing ? `<ul class="warnings timing">
+        <li style="--tone:${tone}"><b>${timing.verdict}</b> leaving ${clock(timing.startHour)}, arriving ${clock(timing.endHour)} · air ${timing.minAirC.toFixed(0)} to ${timing.maxAirC.toFixed(0)} °C · sun ${timing.minSunDeg < 0 ? 'below the horizon' : `at least ${timing.minSunDeg.toFixed(0)}° up`}</li>
+        ${timing.warnings.slice(0, 2).map((w) => `<li style="--tone:${tone}">${escapeHtml(w)}</li>`).join('')}
+        ${timing.betterStart !== null ? `<li style="--tone:#6fd6ee">Better: leave at ${clock(timing.betterStart)}. <button class="link" data-action="best-time">Set that time</button></li>` : ''}
+      </ul>` : '';
     planner.innerHTML = `${tools}
       <div class="routes">${cards}</div>
+      ${timingLine}
       ${warnings ? `<ul class="warnings">${warnings}</ul>` : '<p class="hint ok">Whole route is rated safe.</p>'}
       <div class="row">
         ${this.following ? '<button data-action="stop" class="primary">Stop</button>' : '<button data-action="go" class="primary">Go</button>'}
@@ -429,6 +441,11 @@ export class Hud {
       case 'csv': return this.actions.exportRoute('csv');
       case 'best': return this.actions.findBestBase();
       case 'home': return this.actions.returnToBase();
+      case 'best-time': {
+        const best = this.timings[this.selected]?.betterStart;
+        if (best !== null && best !== undefined) this.actions.setHour(best);
+        return;
+      }
       default:
     }
   }

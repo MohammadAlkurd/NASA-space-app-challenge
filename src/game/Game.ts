@@ -14,6 +14,7 @@ import {
   ROVER_BATTERY_WH, RATINGS, Router, SUIT_BUDGET_S, formatDuration, rate, roverEnergyWh, speedFactor, toCSV, toGeoJSON,
   type Route, type RoutePoint,
 } from '../planning/Router';
+import { timeRoute } from '../planning/Timeline';
 import { Hud, type Tool } from '../ui/Hud';
 import { Globe } from '../world/Globe';
 import { Markers, type Mission, type Stop } from '../world/Markers';
@@ -91,11 +92,13 @@ export class Game {
       setHour: (hour) => {
         this.hour = hour;
         this.sunsetWarned = false;
+        this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
       },
       setTool: (tool) => this.setTool(tool),
       setScenario: (scenario) => {
         this.scenario = scenario;
         this.hud.setScenario(scenario);
+        this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
       },
       selectRoute: (index) => this.selectRoute(index),
       go: () => this.go(),
@@ -270,7 +273,12 @@ export class Game {
     this.selected = selected;
     if (routes.length && this.rig.mode === 'map' && this.tool === 'plan') this.frameRoutes();
     this.markers.showRoutes(routes, selected);
-    this.hud.setRoutes(routes, selected, this.following);
+    this.hud.setRoutes(routes, selected, this.following, this.timings());
+  }
+
+  /** Each shown route checked against the hours it would actually cover, starting now. */
+  private timings() {
+    return this.routes.map((route) => timeRoute(this.environment, this.scenario, this.hour, route.stats.durationS, route.stats.doseUSv));
   }
 
   private frameAround(point: RoutePoint, radius: number): void {
@@ -411,14 +419,14 @@ export class Game {
     if (this.followDistance >= lengths[lengths.length - 1] - 1) this.followDistance = 0;
     this.following = true;
     if (this.rig.mode === 'map') this.setCamera(this.groundMode);
-    this.hud.setRoutes(this.routes, this.selected, true);
+    this.hud.setRoutes(this.routes, this.selected, true, this.timings());
   }
 
   private stopFollowing(): void {
     if (!this.following) return;
     this.following = false;
     this.active.speed = 0;
-    this.hud.setRoutes(this.routes, this.selected, false);
+    this.hud.setRoutes(this.routes, this.selected, false, this.timings());
   }
 
   private followStep(dt: number): void {
@@ -498,7 +506,12 @@ export class Game {
     this.sky.setSun(Math.max(7, weather.sunElevationDeg), weather.sunAzimuthDeg);
     this.conditions = assess(this.scenario, weather, this.environment.spaceWeather);
     (this.scene.fog as THREE.FogExp2).density = 0.00011 * this.conditions.haze;
-    this.sky.sun.intensity = (1.2 + 2.4 * Math.sin(THREE.MathUtils.degToRad(Math.max(7, weather.sunElevationDeg)))) / (this.conditions.haze > 1 ? 3 : 1);
+    // Daylight fades to a dim twilight level through sunset so the night is readable but clearly dark.
+    const daylight = THREE.MathUtils.smoothstep(weather.sunElevationDeg, -6, 8);
+    const dustDim = this.conditions.haze > 1 ? 0.35 : 1;
+    this.sky.sun.intensity = (1.2 + 2.4 * Math.sin(THREE.MathUtils.degToRad(Math.max(7, weather.sunElevationDeg)))) * daylight * dustDim;
+    this.sky.ambient.intensity = 1.15 * (0.12 + 0.88 * daylight) * (dustDim < 1 ? 0.7 : 1);
+    this.renderer.toneMappingExposure = 1 * (0.3 + 0.7 * daylight);
 
     if (this.traveller === 'rover') this.rover.mastCamera.getWorldPosition(this.eye);
     else this.eye.copy(this.astronaut.eye);
@@ -526,8 +539,8 @@ export class Game {
   private account(dt: number): void {
     const explorer = this.active;
     const missionSeconds = dt * this.timeScale;
-    this.hour = Math.min(18, this.hour + missionSeconds / HOUR_SECONDS);
-    if (this.hour >= 17.5 && !this.sunsetWarned) {
+    this.hour = (this.hour + missionSeconds / HOUR_SECONDS) % 24;
+    if (this.hour >= 17.5 && this.hour < 18.5 && !this.sunsetWarned) {
       this.sunsetWarned = true;
       this.hud.toast('Sunset is near: head back to base. Night falls to about -75 °C.');
     }
