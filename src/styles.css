@@ -1,6 +1,6 @@
-/* Hallmark · shape: app screen · genre: atmospheric · theme: Midnight (deal 3/3, seed full-screen-mars-exploration-game-08be·11fe13a8·2026-11-14·r0)
+/* Hallmark · shape: app screen · genre: atmospheric · theme: Midnight, pushed toward a pixel indie game at the user's request (deal 3/3, seed full-screen-mars-exploration-game-08be·11fe13a8·2026-11-14·r0)
  * nav: Explore and Plan switch, top centre · signature: the minimap over the full-screen terrain · states: loading, landing sites, planning, exploring
- * axes: dark/grotesk-sans/cool · posture: committed · contrast: not yet measured · v2.0.0 */
+ * axes: dark/pixel display + grotesk body/cool · posture: committed · contrast: not yet measured · v2.0.0 */
 /* Hallmark · pre-emit critique: not scored yet, pending the first rendered review */
 :root {
   color-scheme: dark;
@@ -10,12 +10,16 @@
   --color-paper: oklch(14% 0.048 264); --color-paper-2: oklch(18.5% 0.052 264); --color-paper-3: oklch(23% 0.055 264);
   --color-ink: oklch(95% 0.016 250); --color-ink-2: oklch(88% 0.05 245); --color-muted: oklch(73% 0.04 256);
   --color-rule: oklch(29% 0.058 264); --color-rule-2: oklch(40% 0.06 262);
-  --color-accent: oklch(80% 0.11 230); --color-accent-ink: oklch(16% 0.05 264); --color-focus: oklch(84% 0.12 228);
+  --color-accent: oklch(82% 0.14 205); --color-accent-ink: oklch(16% 0.05 264); --color-focus: oklch(84% 0.12 228);
   --color-safe: oklch(76% 0.13 150); --color-care: oklch(84% 0.13 92); --color-danger: oklch(75% 0.15 55); --color-nogo: oklch(72% 0.15 27);
   --color-scrim: oklch(8% 0.04 264 / 0.74); --color-dust: oklch(76% 0.07 60);
   --font-body: 'Mona Sans Variable', ui-sans-serif, system-ui, sans-serif;
-  --display-weight: 300; --display-stretch: 125%;
-  --shadow-card: 0 24px 48px -24px oklch(6% 0.04 264 / 0.7);
+  --font-display: 'Pixelify Sans Variable', var(--font-body);
+  --display-weight: 500; --display-stretch: 100%;
+  --color-line: oklch(7% 0.03 264);
+  --line: 2px solid var(--color-line);
+  --drop: 0 3px 0 var(--color-line);
+  --shadow-card: var(--drop);
   --edge: 14px;
 }
 *, *::before, *::after { box-sizing: border-box; }
@@ -60,7 +64,7 @@ button.link { min-height: 0; padding: 0; background: none; text-decoration: unde
 
 #status { top: var(--edge); left: var(--edge); display: grid; gap: var(--space-2xs); justify-items: start; max-width: 320px; }
 .clock { display: flex; align-items: center; gap: var(--space-sm); background: var(--color-paper); padding: var(--space-2xs) var(--space-2xs) var(--space-2xs) var(--space-sm); font-variant-numeric: tabular-nums; }
-#t-sol { color: var(--color-muted); font-size: var(--text-sm); }
+#t-sol { color: var(--color-muted); font-size: var(--text-sm); white-space: nowrap; }
 #t-clock { min-width: 8ch; font-size: var(--text-lg); font-weight: 500; }
 #speed { min-width: 44px; min-height: 30px; padding: var(--space-2xs); font-variant-numeric: tabular-nums; }
 .flag { --tone: var(--color-safe); display: flex; align-items: baseline; gap: var(--space-xs); background: var(--color-paper); padding: var(--space-2xs) var(--space-sm); font-size: var(--text-sm); }
@@ -189,6 +193,7 @@ input[type='range'] { width: 100%; accent-color: var(--color-accent); margin: 0;
 #photo p { max-width: 900px; font-size: var(--text-sm); color: var(--color-ink-2); text-align: center; }
 
 #touch-controls { display: none; }
+#app:has(#ui:not([data-mode='explore'])) #touch-controls, #app:has(.overlay:not([hidden])) #touch-controls { display: none !important; }
 @media (pointer: coarse) {
   #touch-controls { display: block; position: absolute; left: 18px; bottom: 120px; z-index: 4; }
   #touch-stick { width: 112px; height: 112px; border-radius: 50%; background: var(--color-scrim); position: relative; touch-action: none; }
@@ -213,6 +218,10 @@ input[type='range'] { width: 100%; accent-color: var(--color-accent); margin: 0;
   #tools button, #layers button { flex: none; white-space: nowrap; }
   #layers .legend, #layers .check { display: none; }
   #planner { width: auto; left: var(--edge); right: var(--edge); translate: none; max-height: 46vh; overflow-y: auto; }
+  /* Prompts and the trip sit above the bottom row, on the right; the stick keeps the left thumb. */
+  #deck { left: auto; right: var(--edge); bottom: 84px; translate: none; justify-items: end; max-width: calc(100% - 150px); }
+  #prompts { flex-wrap: wrap; justify-content: end; }
+  #touch-controls { bottom: 96px !important; }
   .groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #sites { grid-template-columns: minmax(0, 1fr); }
   .site { height: 150px; }
@@ -224,3 +233,30 @@ input[type='range'] { width: 100%; accent-color: var(--color-accent); margin: 0;
   #checklist .sheet { max-height: none; overflow: visible; box-shadow: none; }
   #checklist button { display: none; }
 }
+
+/* Indie pass: pixel display type, dark outlines and a hard drop under every plate; buttons press down like keys. */
+/* Figures stay in the body face: the pixel 5 reads as an S. */
+h1, h2, h3, button, kbd, .flag b, .gauge span, .route b, .chip, #trip b, .verdict, .shot b { font-family: var(--font-display); }
+#speed, .route, .route .lead, .gauge b, #t-clock { font-family: var(--font-body); font-weight: 600; }
+.route { font-weight: 400; }
+h1, h2 { letter-spacing: 0; }
+button { font-size: var(--text-md); border: var(--line); box-shadow: var(--drop); transition: none; }
+button:active { translate: 0 3px; box-shadow: none; }
+button.link, .close, button.shot { border: 0; box-shadow: none; translate: none; }
+.segmented, .stack { gap: 0; }
+.segmented button + button { border-left: 0; }
+.stack button + button { border-top: 0; }
+.clock, .flag, #vitals, #prompts button, #trip, #guidance, #planner, .legend, .check, .site-action, .sheet, #toast, #minimap, .shot { border: var(--line); box-shadow: var(--drop); }
+#speed, #trip button, .routes .route { box-shadow: none; }
+#t-clock { font-size: var(--text-xl); }
+.flag b { font-size: var(--text-md); }
+.meter { height: 8px; background: var(--color-line); border: var(--line); box-sizing: content-box; }
+.gauge b { font-size: 1.6rem; }
+kbd { font-size: var(--text-md); }
+#tray { gap: var(--space-xs); }
+.routes { gap: var(--space-xs); padding-bottom: 3px; }
+.route { gap: 0; }
+.route .lead { font-size: var(--text-xl); }
+.route.active { background: var(--color-paper-3); border-color: var(--color-accent); box-shadow: none; }
+.facts { display: flex; flex-wrap: wrap; gap: 0 var(--space-sm); }
+.start-card h1 { text-shadow: 0 4px 0 var(--color-line); }

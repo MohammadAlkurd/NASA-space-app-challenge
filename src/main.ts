@@ -1,4 +1,5 @@
 import '@fontsource-variable/mona-sans/wdth.css';
+import '@fontsource-variable/pixelify-sans/wght.css';
 import './styles.css';
 import { Game } from './game/Game';
 

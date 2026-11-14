@@ -82,7 +82,7 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await expect(page.locator('#trip-check')).toContainText('PASS');
 
   // The checklist lists every leg with the supplies left, and the abort rules in plain words.
-  await expect(page.locator('#planner .route').first()).toContainText(/oxygen \d+ %, water \d+ % left/);
+  await expect(page.locator('#planner .route').first()).toContainText(/\d+ % suit/);
   await page.locator('#planner [data-action="checklist"]').click();
   const legs = page.locator('#checklist table.legs tbody tr');
   await expect(legs.first()).toContainText('Start');
@@ -133,7 +133,19 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   // Follow the route: position changes and dose accumulates.
   const before = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.player.position);
   await page.evaluate(() => (window.__MARS__ as Mars).setTimeScale(20));
-  await page.click('[data-action="go"]:visible');
+  // Start steps into the game without moving; the route is followed from the Go on the ground.
+  await page.click('#planner [data-action="go"]');
+  await expect(page.locator('#ui')).toHaveAttribute('data-mode', 'explore');
+  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.following)).toBe(false);
+  // Esc pauses on the Stats sheet: the Mars clock stops until it is closed.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#stats')).toBeVisible();
+  const pausedAt = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.hour as number);
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.hour as number)).toBe(pausedAt);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#stats')).toBeHidden();
+  await page.click('#trip [data-action="go"]');
   await page.waitForFunction(
     (start) => {
       const d = window.__THREE_GAME_DIAGNOSTICS__!;

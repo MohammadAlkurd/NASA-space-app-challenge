@@ -47,6 +47,8 @@ const LANDER_OFFSET = { x: 16, z: -14 };
 /** Where the rover parks relative to the base marker, so the marker's beam stays clear of it. */
 const ROVER_OFFSET = { x: -1, z: -7 };
 /** Heading that points the astronaut's start position (4 m west, 5 m south of the base) at the lander. */
+/** Stepping out of the planning map within this distance of the rover, the crew faces it. */
+const FACE_ROVER_RANGE = 60;
 const FACE_LANDER = Math.atan2(LANDER_OFFSET.x + 4, LANDER_OFFSET.z - 5);
 
 export class Game {
@@ -729,6 +731,17 @@ export class Game {
       this.hud.toast(`This route crosses ${Math.round(route.stats.noGoM)} m of no-go slope (red). Change it or pick a safe route.`);
       return;
     }
+    // From the planning map, Start only steps into the game, turned to the rover when it is close:
+    // riding or walking is the crew's choice. The route is followed from the Go on the ground.
+    if (this.rig.mode === 'map') {
+      const dx = this.rover.position.x - this.astronaut.position.x;
+      const dz = this.rover.position.z - this.astronaut.position.z;
+      if (this.traveller === 'astronaut' && !this.transfer && Math.hypot(dx, dz) < FACE_ROVER_RANGE) {
+        this.astronaut.place(this.astronaut.position.x, this.astronaut.position.z, Math.atan2(dx, dz));
+      }
+      this.setCamera(this.groundMode);
+      return;
+    }
     const lengths = [0];
     for (let k = 1; k < route.points.length; k += 1) {
       lengths.push(lengths[k - 1] + Math.hypot(route.points[k].x - route.points[k - 1].x, route.points[k].z - route.points[k - 1].z));
@@ -747,7 +760,6 @@ export class Game {
     this.followDistance = best < 60 ? lengths[nearest] : 0;
     if (this.followDistance >= lengths[lengths.length - 1] - 1) this.followDistance = 0;
     this.following = true;
-    if (this.rig.mode === 'map') this.setCamera(this.groundMode);
     this.hud.setRoutes(this.routes, this.selected, true, this.timings());
   }
 
@@ -829,8 +841,9 @@ export class Game {
     if (!this.ready) return;
     const explorer = this.active;
 
-    if (this.started) {
-      if (this.input.consume('Escape')) this.home();
+    const paused = this.started && this.hud.paused;
+    if (this.input.consume('Escape') && this.started) this.hud.escape();
+    if (this.started && !paused) {
       if (this.input.consume('KeyC')) this.setCamera(this.rig.mode === 'first' ? 'chase' : 'first');
       if (this.input.consume('KeyM')) this.setCamera(this.rig.mode === 'map' ? this.groundMode : 'map');
       if (this.input.consume('KeyE')) this.interact();

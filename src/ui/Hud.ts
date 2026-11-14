@@ -377,6 +377,22 @@ export class Hud {
   }
 
   /** Close anything laid over the view. */
+  /** The game stands still while the Stats sheet is open. */
+  get paused(): boolean {
+    return !el(this.root, '#stats').hidden;
+  }
+
+  /** Esc closes whatever is open; with nothing open it pauses on the Stats sheet. */
+  escape(): void {
+    const open = ['#card', '#photo', '#about', '#checklist'].map((id) => el(this.root, id)).filter((sheet) => !sheet.hidden);
+    if (open.length) {
+      for (const sheet of open) sheet.hidden = true;
+      return;
+    }
+    const stats = el(this.root, '#stats');
+    stats.hidden = !stats.hidden;
+  }
+
   closeOverlays(): void {
     for (const id of ['#card', '#photo', '#about', '#checklist', '#stats']) el(this.root, id).hidden = true;
   }
@@ -620,15 +636,12 @@ export class Hud {
       const travelS = trip.totalS - trip.stopS;
       const durationS = travelS > 0 ? (r.stats.durationS * (totalS - trip.stopS)) / travelS : r.stats.durationS;
       const share = rover ? trip.resource / ROVER_BATTERY_WH : trip.resource;
-      const resource = `${Number.isFinite(share) ? Math.round(share * 100) : '—'} % ${rover ? 'battery' : 'suit energy'}`;
+      const left = Number.isFinite(share) ? `${Math.round(Math.max(0, 1 - share) * 100)} %` : '—';
       return `<button class="route ${index === this.selected ? 'active' : ''}" data-route="${index}">
         <b>${r.label}</b>
         <span class="chip" style="--tone:${TONE[r.stats.worst]}">${r.stats.worst}</span>
-        <span class="lead">${formatDuration(durationS)}</span>
-        <span>${(r.stats.distanceM / 1000).toFixed(2)} km, ${trip.oneWay ? 'one way to shelter' : `${formatDuration(totalS)} there and back`}</span>
-        <span>${resource}</span>
-        <span>${(this.timings[index]?.doseUSv ?? trip.doseUSv).toFixed(1)} µSv</span>
-        ${supplies(r)}
+        <span class="lead">${formatDuration(trip.oneWay ? durationS : totalS)}</span>
+        <span class="facts"><span>${(r.stats.distanceM / 1000).toFixed(2)} km${trip.oneWay ? '' : ' out'}</span><span>${left} ${rover ? 'battery' : 'suit'}</span><span>${(this.timings[index]?.doseUSv ?? trip.doseUSv).toFixed(0)} µSv</span></span>
         ${r.stops.length ? `<span class="science">via ${r.stops.map(escapeHtml).join(', ')}</span>` : ''}
       </button>`;
     }).join('');
@@ -651,7 +664,7 @@ export class Hud {
       <div class="routes">${cards}</div>
       ${lines}
       <div class="row">
-        ${this.following ? '<button data-action="stop" class="primary">Stop</button>' : '<button data-action="go" class="primary">Go</button>'}
+        ${this.following ? '<button data-action="stop" class="primary">Stop</button>' : '<button data-action="go" class="primary">Start</button>'}
         ${drawing ? '<button data-action="undo">Undo</button><button data-action="finish">Compare</button>' : ''}
         <button data-action="checklist">Checklist</button>
         <button data-action="geojson">GeoJSON</button>
@@ -755,9 +768,3 @@ export class Hud {
 }
 
 /** Oxygen and cooling water left at the end of the trip; empty for the rover, which has its own cabin supply. */
-function supplies(route: Route): string {
-  const end = route.stats.trip.checkpoints.at(-1);
-  if (!end || end.oxygen === null || end.water === null) return '';
-  const share = (value: number) => Math.round(Math.max(0, value) * 100);
-  return `<span>oxygen ${share(end.oxygen)} %, water ${share(end.water)} % left</span>`;
-}

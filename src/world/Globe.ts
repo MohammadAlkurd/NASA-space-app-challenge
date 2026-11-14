@@ -39,18 +39,19 @@ function direction(lat: number, lon: number, target = new THREE.Vector3()): THRE
 function labelTexture(text: string, marked: boolean): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d')!;
-  const font = `${marked ? 700 : 500} 40px system-ui, sans-serif`;
+  const font = "600 34px 'Mona Sans Variable', system-ui, sans-serif";
   context.font = font;
-  canvas.width = Math.ceil(context.measureText(text).width) + 40;
-  canvas.height = 64;
+  canvas.width = Math.ceil(context.measureText(text).width) + 36;
+  canvas.height = 56;
   context.font = font;
-  context.fillStyle = marked ? 'rgba(255, 138, 61, 0.95)' : 'rgba(20, 12, 8, 0.7)';
-  context.beginPath();
-  context.roundRect(0, 0, canvas.width, canvas.height, 16);
-  context.fill();
-  context.fillStyle = marked ? '#1d0f06' : '#f1e3d2';
+  // A flat plate with a dark outline, matching the display.
+  context.fillStyle = '#05070f';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = marked ? '#3fd8ee' : '#0d1530';
+  context.fillRect(4, 4, canvas.width - 8, canvas.height - 8);
+  context.fillStyle = marked ? '#05070f' : '#eef2fb';
   context.textBaseline = 'middle';
-  context.fillText(text, 20, 34);
+  context.fillText(text, 18, 30);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
@@ -144,10 +145,10 @@ export class Globe {
     const dotGeometry = new THREE.SphereGeometry(1, 12, 8);
     for (const site of SITES) {
       const normal = direction(site.lat, site.lon);
-      const dot = new THREE.Mesh(dotGeometry, new THREE.MeshBasicMaterial({ color: site.primary ? '#ff8a3d' : '#f1e3d2' }));
+      const dot = new THREE.Mesh(dotGeometry, new THREE.MeshBasicMaterial({ color: '#eef2fb' }));
       dot.scale.setScalar(site.primary ? 0.012 : 0.006);
       dot.position.copy(normal).multiplyScalar(1.004);
-      const { sprite, plain, marked } = label(site.name);
+      const { sprite, plain, marked } = label(site.name.split(' · ')[0]);
       sprite.position.copy(normal).multiplyScalar(1.01);
       this.scene.add(dot, sprite);
       this.labels.push({ sprite, plain, marked, normal, site });
@@ -156,7 +157,7 @@ export class Globe {
     this.markLabels();
     this.pulse = new THREE.Mesh(
       new THREE.RingGeometry(0.02, 0.026, 48),
-      new THREE.MeshBasicMaterial({ color: '#ff8a3d', transparent: true, side: THREE.DoubleSide, depthTest: false }),
+      new THREE.MeshBasicMaterial({ color: '#3fd8ee', transparent: true, side: THREE.DoubleSide, depthTest: false }),
     );
     this.pulse.position.copy(this.target).multiplyScalar(1.006);
     this.pulse.lookAt(this.target.clone().multiplyScalar(2));
@@ -236,12 +237,12 @@ export class Globe {
     return this.selected;
   }
 
-  /** The selected site's name is larger and orange; the rest are plain. */
+  /** The selected site's name is larger and in the accent colour; the rest are plain. */
   private markLabels(): void {
     for (const { sprite, plain, marked, site } of this.labels) {
       const on = site === this.selected;
       const texture = on ? marked : plain;
-      const height = on ? 0.034 : 0.024;
+      const height = on ? 0.026 : 0.02;
       sprite.material.map = texture;
       sprite.scale.set((texture.image.width / texture.image.height) * height, height, 1);
       sprite.renderOrder = on ? 2 : 1;
