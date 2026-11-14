@@ -72,6 +72,7 @@ export interface HudActions {
   setTraveller(mode: TravelMode): void;
   setLayer(layer: LayerId): void;
   setTraverseVisible(visible: boolean): void;
+  setLimitsVisible(visible: boolean): void;
   /** Switch between following the traveller, the helmet view, the map and the globe of all sites. */
   setView(view: ViewId): void;
   /** Reset the view to the traveller on the surface, from wherever the user ended up. */
@@ -203,6 +204,8 @@ export class Hud {
         <div id="layer-list" class="layer-list"></div>
         <p id="legend" class="legend"></p>
         <label class="check"><input id="traverse" type="checkbox" checked /> Perseverance's real path</label>
+        <label class="check"><input id="limits" type="checkbox" checked /> Walk-back limits</label>
+        <p class="legend"><i style="background:#ff5ad6"></i>60 min walk to shelter <i style="background:#ffd23f"></i>Suit energy to get home</p>
         <div id="nearby">
           <header><strong>Nearest science site</strong></header>
           <canvas id="minimap" width="440" height="300"></canvas>
@@ -278,6 +281,7 @@ export class Hud {
     // The slider follows the running clock except while it is being dragged; keyboard focus stays on it.
     hour.addEventListener('pointerdown', () => { this.draggingHour = true; });
     for (const done of ['pointerup', 'pointercancel', 'change']) hour.addEventListener(done, () => { this.draggingHour = false; });
+    el<HTMLInputElement>(this.root, '#limits').addEventListener('change', (event) => actions.setLimitsVisible((event.target as HTMLInputElement).checked));
     el<HTMLInputElement>(this.root, '#traverse').addEventListener('change', (event) => actions.setTraverseVisible((event.target as HTMLInputElement).checked));
     el(this.root, '#shelter-button').addEventListener('click', () => actions.shelter());
     el(this.root, '#near-route').addEventListener('click', () => this.nearStop && actions.routeToStop(this.nearStop));

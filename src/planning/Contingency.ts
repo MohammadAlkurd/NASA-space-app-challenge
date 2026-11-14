@@ -1,6 +1,6 @@
 import { PROFILES } from '../entities/Explorer';
 import { Analysis, GRID } from './Analysis';
-import { gradeDeg, marquezSpeed, walkEnergyJ } from './Models';
+import { MODEL, SHELTER_PACE, gradeDeg, marquezSpeed, walkEnergyJ } from './Models';
 import type { RoutePoint } from './Router';
 
 const STEPS = [
@@ -17,20 +17,30 @@ export class Contingency {
   readonly homeS = new Float32Array(GRID * GRID);
   /** Suit energy for that walk, joules. */
   readonly homeJ = new Float32Array(GRID * GRID);
+  /** Seconds for the same walk at the suit-failure pace NASA tested (2.1 km/h, slower on steep ground). */
+  readonly slowS = new Float32Array(GRID * GRID);
+  /** The same walk at the planned (unhurried) pace: clear-sol seconds, and joules at the pace the weather allows. */
+  readonly planS = new Float32Array(GRID * GRID);
+  readonly planJ = new Float32Array(GRID * GRID);
   private key = '';
 
   constructor(private readonly analysis: Analysis) {}
 
-  update(shelters: RoutePoint[]): void {
+  /** Returns true when the fields were recomputed. */
+  update(shelters: RoutePoint[], speedFactor = 1): boolean {
     const analysis = this.analysis;
     const sources = shelters.map((s) => analysis.index(s.x, s.z));
-    const key = sources.join(',');
-    if (key === this.key) return;
+    const key = `${sources.join(',')}|${speedFactor}`;
+    if (key === this.key) return false;
     this.key = key;
-    const { homeS, homeJ } = this;
+    const { homeS, homeJ, slowS, planS, planJ } = this;
+    const planned = MODEL.walkPlanSpeed.value;
     const limit = PROFILES.astronaut.maxSlope;
     homeS.fill(Infinity);
     homeJ.fill(Infinity);
+    slowS.fill(Infinity);
+    planS.fill(Infinity);
+    planJ.fill(Infinity);
     // Binary heap of cell indices ordered by walk time.
     const heap: number[] = [];
     const push = (cell: number) => {
@@ -64,6 +74,9 @@ export class Contingency {
     for (const source of sources) {
       homeS[source] = 0;
       homeJ[source] = 0;
+      slowS[source] = 0;
+      planS[source] = 0;
+      planJ[source] = 0;
       push(source);
     }
     while (heap.length) {
@@ -86,9 +99,44 @@ export class Contingency {
         if (time < homeS[next]) {
           homeS[next] = time;
           homeJ[next] = homeJ[current] + walkEnergyJ(length, grade, speed);
+          slowS[next] = slowS[current] + length / Math.min(speed, SHELTER_PACE);
+          const unhurried = Math.min(speed, planned);
+          planS[next] = planS[current] + length / unhurried;
+          planJ[next] = planJ[current] + walkEnergyJ(length, grade, unhurried * speedFactor);
           push(next);
         }
       }
     }
+    return true;
+  }
+
+  /** Line where a field crosses `level`, as flat world-space segments [x1, z1, x2, z2, ...]. */
+  contour(field: Float32Array, level: number): number[] {
+    const { cell } = this.analysis;
+    const half = this.analysis.site.local.half;
+    const out: number[] = [];
+    const cap = level * 4 + 1;
+    const edge: number[] = [];
+    for (let j = 0; j < GRID - 1; j += 1) {
+      for (let i = 0; i < GRID - 1; i += 1) {
+        const o = j * GRID + i;
+        const a = Math.min(field[o], cap);
+        const b = Math.min(field[o + 1], cap);
+        const c = Math.min(field[o + GRID + 1], cap);
+        const d = Math.min(field[o + GRID], cap);
+        const code = (a > level ? 1 : 0) | (b > level ? 2 : 0) | (c > level ? 4 : 0) | (d > level ? 8 : 0);
+        if (code === 0 || code === 15) continue;
+        edge.length = 0;
+        const x = -half + (i + 0.5) * cell;
+        const z = -half + (j + 0.5) * cell;
+        const cross = (p: number, q: number) => (level - p) / (q - p);
+        if ((a > level) !== (b > level)) edge.push(x + cross(a, b) * cell, z);
+        if ((b > level) !== (c > level)) edge.push(x + cell, z + cross(b, c) * cell);
+        if ((d > level) !== (c > level)) edge.push(x + cross(d, c) * cell, z + cell);
+        if ((a > level) !== (d > level)) edge.push(x, z + cross(a, d) * cell);
+        for (let k = 0; k + 3 < edge.length; k += 4) out.push(edge[k], edge[k + 1], edge[k + 2], edge[k + 3]);
+      }
+    }
+    return out;
   }
 }

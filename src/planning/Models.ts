@@ -31,6 +31,7 @@ export const MODEL = {
   stopTime: c(30, 'min', 'ASSUMPTION', 'Time spent at the destination before heading back', 'Ours, adjustable'),
   marginal: c(20, '%', 'ASSUMPTION', 'A trip that leaves less than this is rated MARGINAL', 'Ours'),
   shelterWalk: c(60, 'min', 'ANALOG', 'Longest walk to a pressurised shelter if the suit CO₂ scrubber fails', 'NASA tested a 1 h, 2.0 km walk-back at 2.1 km/h or faster: Keller et al. 2024 (NTRS 20240013261)'),
+  shelterPace: c(2.1, 'km/h', 'ANALOG', 'Walking pace assumed for that walk (slower on steep ground)', 'Slowest pace held in the same test: Keller et al. 2024 (NTRS 20240013261)'),
   roverSpeed: c(2.0, 'm/s', 'ANALOG', 'Crew rover planning speed', 'Apollo 15 as-driven mean; best case 2.6 m/s. Speed showed no strong link to slope or roughness: Jacob et al. (NTRS 20250011301)'),
   roverMass: c(4000, 'kg', 'NASA STUDY', 'Crew rover with payload', 'NASA Space Exploration Vehicle fact sheet: 6,600 lb vehicle + 2,200 lb payload'),
   roverLevel: c(0.216, 'J/(kg·m)', 'ANALOG', 'Rover drive energy on level ground in lunar gravity', `Carr 2001, ${SEXTANT}; scaled by Mars/Moon gravity (ASSUMPTION)`),
@@ -51,6 +52,7 @@ export const STOP_S = MODEL.stopTime.value * 60;
 /** Hours of work one suit fill supports at the Apollo average rate. */
 export const SUIT_WORK_S = SUIT_ENERGY_J / WORK_RATE_W;
 export const SHELTER_WALK_S = MODEL.shelterWalk.value * 60;
+export const SHELTER_PACE = MODEL.shelterPace.value / 3.6;
 
 export type Mover = 'rover' | 'astronaut';
 

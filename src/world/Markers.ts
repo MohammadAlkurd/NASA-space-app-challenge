@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import type { Rating, Route, RoutePoint } from '../planning/Router';
 import type { SiteData } from './SiteData';
 
@@ -61,6 +63,8 @@ function labelSprite(text: string, color: string): THREE.Sprite {
 export class Markers {
   readonly group = new THREE.Group();
   readonly traverse = new THREE.Group();
+  /** Walk-back limit rings around the shelters. */
+  readonly limits = new THREE.Group();
   private readonly routes = new THREE.Group();
   private readonly stops = new THREE.Group();
   private readonly pins = new THREE.Group();
@@ -70,7 +74,7 @@ export class Markers {
   private readonly you: THREE.Mesh;
 
   constructor(private readonly site: SiteData, readonly mission: Mission) {
-    this.group.add(this.traverse, this.routes, this.stops, this.pins);
+    this.group.add(this.traverse, this.limits, this.routes, this.stops, this.pins);
     for (const path of mission.traverse.paths) {
       this.traverse.add(this.line(path.map(([x, z]) => ({ x, z })), () => '#7fd8ff', 2.5, 0.9));
     }
@@ -110,6 +114,38 @@ export class Markers {
     });
     const route = routes[selected];
     if (route) this.routes.add(this.line(route.points, (k) => RATING_COLORS[route.ratings[k]], 6, 1.6));
+    const turn = route?.stats.trip.turnBack;
+    if (turn) {
+      const mark = this.pin('#ff5ad6', 0.8);
+      const label = labelSprite('TURN BACK', '#ff5ad6');
+      label.position.y = 30;
+      mark.add(label);
+      mark.position.set(turn.x, this.site.groundAt(turn.x, turn.z), turn.z);
+      this.routes.add(mark);
+    }
+  }
+
+  /** Draw limit rings from flat [x1, z1, x2, z2, ...] segment lists. */
+  setLimits(rings: { segments: number[]; color: string }[]): void {
+    this.clear(this.limits);
+    for (const ring of rings) {
+      if (!ring.segments.length) continue;
+      const positions: number[] = [];
+      for (let k = 0; k < ring.segments.length; k += 2) {
+        const x = ring.segments[k];
+        const z = ring.segments[k + 1];
+        positions.push(x, this.site.groundAt(x, z) + 1.4, z);
+      }
+      const geometry = new LineSegmentsGeometry();
+      geometry.setPositions(positions);
+      const material = new LineMaterial({ color: ring.color, linewidth: 2.5, transparent: true, opacity: 0.85, depthTest: false, fog: false });
+      material.resolution.set(window.innerWidth, window.innerHeight);
+      this.lineMaterials.push(material);
+      const line = new LineSegments2(geometry, material);
+      line.renderOrder = 9;
+      line.frustumCulled = false;
+      this.limits.add(line);
+    }
   }
 
   setBase(point: RoutePoint): void {

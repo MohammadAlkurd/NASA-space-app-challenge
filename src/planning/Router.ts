@@ -54,6 +54,9 @@ export interface Trip {
   doseUSv: number;
   /** Longest walk to a pressurised shelter from any point of the route, seconds at the emergency pace. */
   shelterS: number;
+  /** Last point from which turning around still meets the walk-back rules; null when the whole route does. */
+  turnBack: RoutePoint | null;
+  turnBackM: number;
   verdict: Feasibility;
   /** The rule that decides the verdict, in plain words. */
   reason: string;
@@ -63,7 +66,12 @@ export interface Trip {
 export interface TripContext {
   contingency: Contingency;
   shelters: RoutePoint[];
+  /** Share of the active traveller's suit energy or battery left, 0..1. */
   reserve: number;
+  /** Share of suit energy left, 0..1 (matters in the rover too: a breakdown means walking home). */
+  suit: number;
+  /** Weather slowdown on travel speed, 1 on a clear sol. */
+  speedFactor: number;
 }
 
 export interface Route {
@@ -218,7 +226,7 @@ export class Router {
     const stats: RouteStats = {
       distanceM: 0, durationS: 0, ascentM: 0, descentM: 0, maxSlopeDeg: 0, doseUSv: 0, resource: 0,
       worst: 'SAFE', noGoM: 0, cautionM: 0,
-      trip: { oneWay: false, totalS: 0, resource: 0, doseUSv: 0, shelterS: 0, verdict: 'PASS', reason: '' },
+      trip: { oneWay: false, totalS: 0, resource: 0, doseUSv: 0, shelterS: 0, turnBack: null, turnBackM: 0, verdict: 'PASS', reason: '' },
     };
     const mover = profile.mode;
     // The same path walked the other way: slopes reverse, so time and energy differ.
@@ -242,7 +250,7 @@ export class Router {
       const time = length / speed;
       const speedBack = pace(mover, -grade);
       back.s += length / speedBack;
-      back.j += travelEnergyJ(mover, length, -grade, speedBack);
+      back.j += travelEnergyJ(mover, length, -grade, speedBack * context.speedFactor);
       back.dose += (doseRate(analysis.skyView[cell]) * length) / speedBack / 3600;
       stats.distanceM += length;
       stats.durationS += time;
@@ -250,7 +258,7 @@ export class Router {
       else stats.descentM -= climb;
       stats.maxSlopeDeg = Math.max(stats.maxSlopeDeg, slope);
       stats.doseUSv += (doseRate(analysis.skyView[cell]) * time) / 3600;
-      energyJ += travelEnergyJ(mover, length, grade, speed);
+      energyJ += travelEnergyJ(mover, length, grade, speed * context.speedFactor);
       usedJ.push(energyJ);
       if (rating === 'NO-GO') stats.noGoM += length;
       if (rating !== 'SAFE') stats.cautionM += length;
@@ -290,25 +298,42 @@ export class Router {
     let shelterS = 0;
     let farJ = 0;
     for (const cell of cells) {
-      shelterS = Math.max(shelterS, contingency.homeS[cell]);
+      shelterS = Math.max(shelterS, contingency.slowS[cell]);
       farJ = Math.max(farJ, contingency.homeJ[cell]);
     }
     // The way back: the same path when it started at a shelter (or by rover), else the walk to the nearest shelter.
     const home = rover || near(points[0])
       ? back
-      : { s: contingency.homeS[endCell], j: contingency.homeJ[endCell], dose: (doseRate(analysis.skyView[endCell]) * contingency.homeS[endCell]) / 3600 };
+      : { s: contingency.planS[endCell], j: contingency.planJ[endCell], dose: (doseRate(analysis.skyView[endCell]) * contingency.planS[endCell]) / 3600 };
+    // Cut off from shelter: the trip fails below; keep the totals finite for the clock and the card.
+    const reachable = Number.isFinite(home.s);
     const stopJ = rover ? 0 : WORK_RATE_W * STOP_S;
     const needJ = oneWay ? outJ : outJ + stopJ + home.j;
     const trip: Trip = {
       oneWay,
-      totalS: oneWay ? out.durationS : out.durationS + STOP_S + home.s,
-      resource: unit(needJ),
-      doseUSv: oneWay ? out.doseUSv : out.doseUSv + (doseRate(analysis.skyView[endCell]) * STOP_S) / 3600 + home.dose,
+      totalS: oneWay || !reachable ? out.durationS : out.durationS + STOP_S + home.s,
+      resource: unit(reachable ? needJ : outJ),
+      doseUSv: oneWay || !reachable ? out.doseUSv : out.doseUSv + (doseRate(analysis.skyView[endCell]) * STOP_S) / 3600 + home.dose,
       shelterS,
+      turnBack: null,
+      turnBackM: 0,
       verdict: 'PASS',
       reason: '',
     };
     const haveJ = reserve * budgetJ;
+    if (!rover) {
+      // Walk the route until either rule breaks: energy to get home, or the 60 min walk to shelter.
+      let along = 0;
+      for (let k = 1; k < points.length; k += 1) {
+        const ok = usedJ[k] + contingency.homeJ[cells[k]] <= haveJ && contingency.slowS[cells[k]] <= SHELTER_WALK_S;
+        if (!ok) {
+          trip.turnBack = points[k - 1];
+          trip.turnBackM = along;
+          break;
+        }
+        along += Math.hypot(points[k].x - points[k - 1].x, points[k].z - points[k - 1].z);
+      }
+    }
     const leftShare = Math.round(((haveJ - needJ) / budgetJ) * 100);
     const what = rover ? 'battery' : 'suit energy';
     const where = oneWay ? 'on arrival' : rover ? 'after the drive back' : 'back at shelter';
@@ -319,20 +344,14 @@ export class Router {
     if (!Number.isFinite(needJ) || !Number.isFinite(shelterS)) {
       set('FAIL', 'No-go slopes cut part of this route off from shelter on foot.');
     } else if (needJ > haveJ) {
-      // Last point from which the walk home still fits in what is left.
-      let turn = 0;
-      let along = 0;
-      for (let k = 1; k < points.length; k += 1) {
-        along += Math.hypot(points[k].x - points[k - 1].x, points[k].z - points[k - 1].z);
-        if (!rover && usedJ[k] + contingency.homeJ[cells[k]] <= haveJ) turn = along;
-      }
+      const turn = trip.turnBackM;
       set('FAIL', rover
         ? `Not enough battery for the trip${oneWay ? '' : ' there and back'}: it needs ${Math.round((needJ / budgetJ) * 100)} %, the rover has ${Math.round(reserve * 100)} %.`
         : `Not enough suit energy to get ${oneWay ? 'there' : 'back'}: the trip needs ${Math.round((needJ / budgetJ) * 100)} % of a full suit, you have ${Math.round(reserve * 100)} %.${turn > 0 && turn < out.distanceM * 0.95 && !oneWay ? ` Turn back by ${(turn / 1000).toFixed(1)} km.` : ''}`);
-    } else if (rover && farJ > SUIT_ENERGY_J) {
-      set('FAIL', 'If the rover broke down at the far end, the walk back to the lander needs more than one suit holds.');
+    } else if (rover && farJ > context.suit * SUIT_ENERGY_J) {
+      set('FAIL', `If the rover broke down at the far end, the walk back to the lander needs more suit energy than you have (${Math.round(context.suit * 100)} %).`);
     } else if (!rover && shelterS > SHELTER_WALK_S) {
-      set('MARGINAL', `Up to ${Math.round(shelterS / 60)} min from shelter. NASA's suit-failure walk-back test covered ${MODEL.shelterWalk.value} min: park the rover closer.`);
+      set('MARGINAL', `Up to ${Math.round(shelterS / 60)} min from shelter at the ${MODEL.shelterPace.value} km/h suit-failure pace. NASA's walk-back test covered ${MODEL.shelterWalk.value} min: park the rover closer${trip.turnBackM > 0 ? ` or turn back by ${(trip.turnBackM / 1000).toFixed(1)} km` : ''}.`);
     } else if (haveJ - needJ < (MODEL.marginal.value / 100) * budgetJ) {
       set('MARGINAL', `Only ${leftShare} % ${what} left ${where}, under the ${MODEL.marginal.value} % margin.`);
     } else {

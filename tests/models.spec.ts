@@ -62,4 +62,10 @@ test.describe('planning models', () => {
     const lbPerHour = (2505 * MODEL.oxygen.value) / 453.6;
     expect(Math.abs(lbPerHour - 0.4) / 0.4).toBeLessThan(0.05);
   });
+
+  test('a dust-slowed trip costs more energy over the same ground', () => {
+    const dust = 0.7;
+    expect(walkEnergyJ(1000, 0, 0.9 * dust)).toBeGreaterThan(walkEnergyJ(1000, 0, 0.9));
+    expect(roverEnergyJ(1000, 0, MODEL.roverSpeed.value * dust)).toBeGreaterThan(roverEnergyJ(1000, 0));
+  });
 });

@@ -16,7 +16,7 @@ import {
   type Route, type RoutePoint, type TripContext,
 } from '../planning/Router';
 import { Contingency } from '../planning/Contingency';
-import { SUIT_ENERGY_J, SUIT_WORK_S, WORK_RATE_W, gradeDeg, pace, travelEnergyJ } from '../planning/Models';
+import { SHELTER_WALK_S, SUIT_ENERGY_J, SUIT_WORK_S, WORK_RATE_W, gradeDeg, pace, travelEnergyJ } from '../planning/Models';
 import { clock, timeRoute } from '../planning/Timeline';
 import { Hud, type Tool, type ViewId } from '../ui/Hud';
 import { Globe, SITES } from '../world/Globe';
@@ -117,6 +117,8 @@ export class Game {
   private hudTimer = 0;
   private homeOnFoot!: Contingency;
   private homeFromRover!: Contingency;
+  private limitsKey = '';
+  private limitsTimer = 0;
   private sunsetWarned = false;
   private camping = false;
   private campWasNoGo = false;
@@ -132,6 +134,7 @@ export class Game {
       setTraveller: (mode) => this.setTraveller(mode),
       setLayer: (layer) => this.setLayer(layer),
       setTraverseVisible: (visible) => (this.markers.traverse.visible = visible),
+      setLimitsVisible: (visible) => (this.markers.limits.visible = visible),
       setView: (view) => this.chooseView(view),
       home: () => this.home(),
       setTimeScale: (scale) => this.setTimeScale(scale),
@@ -147,7 +150,9 @@ export class Game {
         this.hud.setScenario(scenario);
         this.refreshSolarDay();
         if (this.layer === 'solar') this.setLayer('solar');
-        this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
+        // Dust slows travel, which changes the energy every route needs: plan the trip again for the new weather.
+        if (this.destination && this.routes.length && !this.following && this.tool === 'plan') this.planTo(this.destination);
+        else this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
         if (scenario !== 'clear' && this.started) this.stormAlert(scenario);
       },
       selectRoute: (index) => this.selectRoute(index),
@@ -415,13 +420,35 @@ export class Game {
   }
 
   /** Where shelter is and what is left in the suit or battery, for checking a whole trip. */
+  /**
+   * Rings on the map. On foot: the 60 min walk to shelter at the tested suit-failure pace, and the line past
+   * which the suit energy left no longer covers the walk home. In the rover: how far a full suit walks home.
+   */
+  private refreshLimits(): void {
+    const { contingency, reserve, suit } = this.tripContext();
+    const rover = this.traveller === 'rover';
+    const key = rover
+      ? `rover|${this.base.x},${this.base.z}|${Math.ceil(suit * 50)}`
+      : `foot|${Math.round(this.rover.position.x / 10)},${Math.round(this.rover.position.z / 10)}|${this.base.x},${this.base.z}|${Math.ceil(reserve * 50)}`;
+    if (key === this.limitsKey) return;
+    this.limitsKey = key;
+    this.markers.setLimits(rover
+      ? [{ segments: contingency.contour(contingency.homeJ, suit * SUIT_ENERGY_J), color: '#ffd23f' }]
+      : [
+          { segments: contingency.contour(contingency.slowS, SHELTER_WALK_S), color: '#ff5ad6' },
+          { segments: contingency.contour(contingency.homeJ, reserve * SUIT_ENERGY_J), color: '#ffd23f' },
+        ]);
+  }
+
   private tripContext(): TripContext {
     const rover = this.traveller === 'rover';
     // On foot the parked rover is a shelter too; a rover trip is checked against a walk back to the lander.
     const shelters = rover ? [this.base] : [this.base, { x: this.rover.position.x, z: this.rover.position.z }];
     const contingency = rover ? this.homeFromRover : this.homeOnFoot;
-    contingency.update(shelters);
-    return { contingency, shelters, reserve: Math.max(0, rover ? 1 - this.energyWh / ROVER_BATTERY_WH : 1 - this.suitJ / SUIT_ENERGY_J) };
+    const speedFactor = this.conditions?.speedFactor ?? 1;
+    contingency.update(shelters, speedFactor);
+    const suit = Math.max(0, 1 - this.suitJ / SUIT_ENERGY_J);
+    return { contingency, shelters, suit, speedFactor, reserve: rover ? Math.max(0, 1 - this.energyWh / ROVER_BATTERY_WH) : suit };
   }
 
   private showRoutes(routes: Route[], selected: number): void {
@@ -833,6 +860,11 @@ export class Game {
     this.rocks.mesh.visible = this.rig.mode !== 'map';
     if (this.rig.mode !== 'map') this.rocks.update(explorer.position);
 
+    this.limitsTimer -= dt;
+    if (this.limitsTimer <= 0 && this.started) {
+      this.limitsTimer = 1;
+      this.refreshLimits();
+    }
     this.hudTimer -= dt;
     if (this.hudTimer <= 0 && this.started) {
       this.hudTimer = 0.15;
