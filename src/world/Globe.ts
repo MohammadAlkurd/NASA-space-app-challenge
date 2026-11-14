@@ -277,9 +277,10 @@ export class Globe {
     if (this.swing && !this.diving) {
       // Shortest way round to the chosen site.
       const turn = ((this.selected.lon - this.longitude + 540) % 360) - 180;
+      const tilt = THREE.MathUtils.clamp(this.selected.lat, -80, 80) - this.latitude;
       this.longitude += turn * Math.min(1, 3 * dt);
-      this.latitude += (THREE.MathUtils.clamp(this.selected.lat, -80, 80) - this.latitude) * Math.min(1, 3 * dt);
-      if (Math.abs(turn) < 0.2) this.swing = false;
+      this.latitude += tilt * Math.min(1, 3 * dt);
+      if (Math.abs(turn) < 0.2 && Math.abs(tilt) < 0.2) this.swing = false;
     }
     if (this.diving) {
       this.dive += dt;
