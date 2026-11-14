@@ -95,6 +95,11 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; heigh
 #near-name { font-size: 15px; }
 #nearby .legend { min-height: 0; }
 #shelter-button { width: 100%; }
+#globe-panel { top: 0; right: 0; bottom: 0; width: calc(var(--rail) + 40px); border-left: 1px solid var(--line); overflow-y: auto; }
+#globe-panel .layer-list button { padding: 7px 10px 7px 12px; }
+#globe-panel .layer-list span { color: var(--muted); font-size: 12px; }
+.site-card { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.site-card h2 { font-size: 22px; line-height: 1.05; text-transform: uppercase; }
 .check input { accent-color: #7fd8ff; width: 16px; height: 16px; margin: 0; }
 #layers .row { margin-top: auto; }
 

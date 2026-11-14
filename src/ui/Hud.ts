@@ -3,6 +3,7 @@ import type { TravelMode } from '../entities/Explorer';
 import type { LayerId } from '../planning/Analysis';
 import type { BaseScore } from '../planning/BaseSite';
 import { ROVER_BATTERY_WH, formatDuration, type Rating, type Route } from '../planning/Router';
+import { SITES, type GlobeSite } from '../world/Globe';
 import { RATING_COLORS, type Stop } from '../world/Markers';
 import { ABOUT_HTML } from './about';
 
@@ -68,6 +69,10 @@ export interface HudActions {
   toggleCamera(): void;
   setTimeScale(scale: number): void;
   shelter(): void;
+  /** Leave the surface map for the globe of all landing sites. */
+  openGlobe(): void;
+  /** A landing site chosen on the globe, by name. */
+  pickSite(name: string): void;
   setHour(hour: number): void;
   setScenario(scenario: 'clear' | 'dust' | 'solar'): void;
   setTool(tool: Tool): void;
@@ -197,7 +202,10 @@ export class Hud {
           <button id="cam-button">Helmet view</button>
           <button id="about-button">Sources</button>
         </div>
+        <button id="globe-button" title="Or keep zooming out of the map">All Mars landing sites</button>
       </aside>
+
+      <aside id="globe-panel" class="panel" hidden></aside>
 
       <section id="planner" class="panel" hidden></section>
       <section id="card" class="panel" hidden></section>
@@ -244,6 +252,13 @@ export class Hud {
     });
     this.mapImage.src = `${this.photoBase}ortho.jpg`;
     el(this.root, '#view-button').addEventListener('click', () => actions.toggleView());
+    el(this.root, '#globe-button').addEventListener('click', () => actions.openGlobe());
+    el(this.root, '#globe-panel').addEventListener('click', (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('[data-land]')) actions.start();
+      const site = target.closest<HTMLElement>('[data-site]');
+      if (site) actions.pickSite(site.dataset.site!);
+    });
     el(this.root, '#cam-button').addEventListener('click', () => actions.toggleCamera());
     el(this.root, '#about-button').addEventListener('click', () => (el(this.root, '#about').hidden = false));
     el(this.root, '#about-close').addEventListener('click', () => (el(this.root, '#about').hidden = true));
@@ -263,6 +278,33 @@ export class Hud {
   /** Reveal the working panels once the traveller is on the surface. */
   showPanels(): void {
     for (const id of ['#telemetry', '#layers', '#planner']) el(this.root, id).hidden = false;
+  }
+
+  /** Orbit view: the surface panels give way to the list of NASA landing sites. */
+  showGlobe(selected: GlobeSite): void {
+    for (const id of ['#telemetry', '#layers', '#planner', '#card', '#guidance', '#visor']) el(this.root, id).hidden = true;
+    const panel = el(this.root, '#globe-panel');
+    const east = ((selected.lon % 360) + 360) % 360;
+    panel.hidden = false;
+    panel.innerHTML = /* html */ `
+      <header><strong>NASA landing sites</strong></header>
+      <p class="hint">Drag to turn Mars. Click a site, on the globe or here.</p>
+      <div class="layer-list">${SITES.map((site) => {
+        const [place, mission] = site.name.split(' · ');
+        return `<button class="${site === selected ? 'active' : ''}" data-site="${escapeHtml(site.name)}"><b>${escapeHtml(place)}</b><span>${escapeHtml(mission)} · ${escapeHtml(site.mission)}</span></button>`;
+      }).join('')}</div>
+      <div class="site-card">
+        <p class="eyebrow">${Math.abs(selected.lat).toFixed(2)}° ${selected.lat >= 0 ? 'N' : 'S'} · ${east.toFixed(2)}° E</p>
+        <h2>${escapeHtml(selected.name)}</h2>
+        <p>${escapeHtml(selected.note)}</p>
+        ${selected.primary
+          ? '<p class="muted small">Walkable here: 1 m NASA terrain, weather, radiation and rover photos.</p><button class="primary" data-land>Land here</button>'
+          : '<p class="muted small">Seen from orbit only in this build. The walkable 1 m terrain is loaded for Jezero.</p><button data-site="Jezero Crater · Perseverance">Back to Jezero</button>'}
+      </div>`;
+  }
+
+  hideGlobe(): void {
+    el(this.root, '#globe-panel').hidden = true;
   }
 
   setReady(): void {

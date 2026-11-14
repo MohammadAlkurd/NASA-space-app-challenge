@@ -17,7 +17,7 @@ import {
 } from '../planning/Router';
 import { clock, timeRoute } from '../planning/Timeline';
 import { Hud, type Tool } from '../ui/Hud';
-import { Globe } from '../world/Globe';
+import { Globe, SITES } from '../world/Globe';
 import { Markers, type Mission, type Stop } from '../world/Markers';
 import { Rocks } from '../world/Rocks';
 import { loadSite, type SiteData } from '../world/SiteData';
@@ -63,6 +63,8 @@ export class Game {
 
   private ready = false;
   private started = false;
+  /** How far the user has scrolled out past the widest view; enough of it opens the next view up. */
+  private zoomPast = 1;
   private frame = 0;
   private elapsed = 0;
   private traveller: TravelMode = 'astronaut';
@@ -133,6 +135,8 @@ export class Game {
       setBaseHere: () => this.lastBase && this.setBase(this.lastBase),
       returnToBase: () => this.planTo(this.base),
       shelter: () => this.shelter(),
+      openGlobe: () => this.openGlobe(),
+      pickSite: (name) => this.selectSite(name),
     }, `${import.meta.env.BASE_URL}data/jezero/`);
     this.globe = new Globe(`${import.meta.env.BASE_URL}data/globe/`);
     window.addEventListener('resize', this.onResize);
@@ -213,8 +217,44 @@ export class Game {
 
   /** Start pressed: dive from orbit to Jezero, then hand over to the surface. */
   private begin(): void {
-    if (this.globe) this.globe.startDive();
-    else this.land();
+    if (this.globe) {
+      this.globe.startDive();
+      this.hud.hideGlobe();
+    } else this.land();
+  }
+
+  /** Leave the surface for the globe of all NASA landing sites. The mission clock stops while in orbit. */
+  private openGlobe(): void {
+    if (this.globe || !this.started) return;
+    this.zoomPast = 1;
+    this.globe = new Globe(`${import.meta.env.BASE_URL}data/globe/`, true);
+    this.onResize();
+    this.hud.showGlobe(this.globe.site);
+  }
+
+  private selectSite(name: string): void {
+    if (!this.globe || this.globe.diving) return;
+    const site = SITES.find((s) => s.name === name);
+    if (!site) return;
+    this.globe.select(site);
+    this.hud.showGlobe(site);
+  }
+
+  /** Wheel or pinch. Scrolling out past the widest view goes up a level: ground to map, map to globe. */
+  private zoom(factor: number): void {
+    if (!this.ready) return;
+    if (this.globe) {
+      if (this.started && this.globe.zoom(factor) && this.globe.site.primary) this.begin();
+      return;
+    }
+    const widest = this.rig.mode === 'map' ? this.rig.mapHeight >= 4200 : this.rig.distance >= 60;
+    this.rig.zoom(factor);
+    if (!this.started) return;
+    this.zoomPast = factor > 1 && widest ? this.zoomPast * factor : 1;
+    if (this.zoomPast < 1.6) return;
+    this.zoomPast = 1;
+    if (this.rig.mode === 'map') this.openGlobe();
+    else this.setCamera('map');
   }
 
   private land(): void {
@@ -222,7 +262,9 @@ export class Game {
     this.globe = null;
     this.started = true;
     this.rig.yaw = 0;
+    this.hud.hideGlobe();
     this.hud.showPanels();
+    this.hud.setView(this.rig.mode === 'map', this.rig.mode === 'first');
     this.pushTelemetry();
     if (this.fade) this.fade.style.opacity = '0';
   }
@@ -601,7 +643,8 @@ export class Game {
     if (this.globe) {
       this.globe.update();
       // Fade to dust over the last part of the dive.
-      if (this.fade) this.fade.style.opacity = String(THREE.MathUtils.smoothstep(this.globe.progress, 0.72, 0.98));
+      // And clear from dust on the way up from the surface.
+      if (this.fade) this.fade.style.opacity = String(Math.max(THREE.MathUtils.smoothstep(this.globe.progress, 0.72, 0.98), 1 - THREE.MathUtils.smoothstep(this.globe.rising, 0, 0.35)));
       if (this.globe.progress >= 1 && this.ready) this.land();
       this.input.endFrame();
       if (this.ready) this.publishDiagnostics();
@@ -788,6 +831,11 @@ export class Game {
 
   private handleClick(clientX: number, clientY: number): void {
     if (!this.started) return;
+    if (this.globe) {
+      const site = this.globe.pick(clientX, clientY);
+      if (site) this.selectSite(site.name);
+      return;
+    }
     const point = this.pick(clientX, clientY);
     if (!point) return;
     if (this.tool === 'base') {
@@ -823,7 +871,7 @@ export class Game {
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         const spread = Math.hypot(a.x - b.x, a.y - b.y);
-        if (pinch > 0 && spread > 0 && this.ready && !this.globe) this.rig.zoom(pinch / spread);
+        if (pinch > 0 && spread > 0) this.zoom(pinch / spread);
         pinch = spread;
       }
     });
@@ -839,7 +887,7 @@ export class Game {
     this.canvas.addEventListener('pointercancel', end);
     this.canvas.addEventListener('wheel', (event) => {
       event.preventDefault();
-      if (this.ready && !this.globe) this.rig.zoom(Math.exp(event.deltaY * 0.0012));
+      this.zoom(Math.exp(event.deltaY * 0.0012));
     }, { passive: false });
   }
 
