@@ -146,7 +146,9 @@ export class Hud {
             <button data-scale="1">Real time</button>
             <button data-scale="5">×5</button>
             <button data-scale="20">×20</button>
+            <button data-scale="60">×60</button>
           </div>
+          <p class="muted small">The Mars clock runs with your travel: rover 2.8 m/s, on foot 0.9 m/s. Speed-up moves you and the clock together.</p>
         </div>
       </aside>
 

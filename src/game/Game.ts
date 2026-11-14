@@ -14,7 +14,7 @@ import {
   ROVER_BATTERY_WH, RATINGS, Router, SUIT_BUDGET_S, formatDuration, rate, roverEnergyWh, speedFactor, toCSV, toGeoJSON,
   type Route, type RoutePoint,
 } from '../planning/Router';
-import { timeRoute } from '../planning/Timeline';
+import { clock, timeRoute } from '../planning/Timeline';
 import { Hud, type Tool } from '../ui/Hud';
 import { Globe } from '../world/Globe';
 import { Markers, type Mission, type Stop } from '../world/Markers';
@@ -98,8 +98,10 @@ export class Game {
       setTool: (tool) => this.setTool(tool),
       setScenario: (scenario) => {
         this.scenario = scenario;
+        this.conditions = assess(scenario, this.environment.at(this.hour), this.environment.spaceWeather);
         this.hud.setScenario(scenario);
         this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
+        if (scenario !== 'clear' && this.started) this.stormAlert(scenario);
       },
       selectRoute: (index) => this.selectRoute(index),
       go: () => this.go(),
@@ -277,9 +279,25 @@ export class Game {
     this.hud.setRoutes(routes, selected, this.following, this.timings());
   }
 
+  /** A storm drill: point the traveller at shelter, which is the base where the rover is parked. */
+  private stormAlert(scenario: Scenario): void {
+    const name = scenario === 'dust' ? 'Dust storm' : 'Solar storm';
+    const position = this.active.position;
+    const away = Math.hypot(position.x - this.base.x, position.z - this.base.z);
+    if (away < 25) {
+      this.hud.toast(`${name} alert. You are at the base: stay in shelter until it clears.`);
+      return;
+    }
+    this.stopFollowing();
+    this.planTo(this.base);
+    this.hud.toast(`${name} alert. Shelter is the base, ${Math.round(away)} m away. The route back is shown: press Go.`);
+  }
+
   /** Each shown route checked against the hours it would actually cover, starting now. */
   private timings() {
-    return this.routes.map((route) => timeRoute(this.environment, this.scenario, this.hour, route.stats.durationS, route.stats.doseUSv));
+    // Dust slows travel, so the trip takes longer and collects more dose than on a clear sol.
+    const slow = 1 / (this.conditions?.speedFactor ?? 1);
+    return this.routes.map((route) => timeRoute(this.environment, this.scenario, this.hour, route.stats.durationS * slow, route.stats.doseUSv * slow));
   }
 
   private frameAround(point: RoutePoint, radius: number): void {
@@ -466,7 +484,8 @@ export class Game {
     const lengths = this.followLengths;
     const left = lengths[lengths.length - 1] - this.followDistance;
     const share = left / Math.max(route.stats.distanceM, 1);
-    let text = `${left >= 1000 ? `${(left / 1000).toFixed(1)} km` : `${Math.round(left)} m`} to go · about ${formatDuration(route.stats.durationS * share)}`;
+    const remainingS = (route.stats.durationS * share) / (this.conditions?.speedFactor ?? 1);
+    let text = `${left >= 1000 ? `${(left / 1000).toFixed(1)} km` : `${Math.round(left)} m`} to go · about ${formatDuration(remainingS)} · arrive ${clock(this.hour + remainingS / HOUR_SECONDS)}`;
     const next = route.segments.find((s) => s.rating !== 'SAFE' && lengths[s.endIndex] > this.followDistance);
     if (next) {
       const distance = lengths[next.startIndex] - this.followDistance;
