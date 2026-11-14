@@ -26,7 +26,7 @@ export interface Telemetry {
   uvIndex: number;
   doseRate: number;
   doseTotal: number;
-  /** 0..1 of suit time or battery left. */
+  /** 0..1 of suit energy or battery left. */
   reserve: number;
   reserveText: string;
   spaceStatus: string;
@@ -627,15 +627,19 @@ export class Hud {
     const route = routes[this.selected];
     const rover = this.traveller === 'rover';
     const cards = routes.map((r, index) => {
-      // Dust slows travel: show the time, and the suit time it uses, for the conditions outside now.
-      const durationS = this.timings[index]?.durationS ?? r.stats.durationS;
-      const slow = r.stats.durationS > 0 ? durationS / r.stats.durationS : 1;
-      const resource = rover ? `${Math.round((r.stats.resource / ROVER_BATTERY_WH) * 100)} % battery` : `${Math.round(r.stats.resource * slow * 100)} % suit time`;
+      // Dust slows travel: show the times for the conditions outside now.
+      const trip = r.stats.trip;
+      const totalS = this.timings[index]?.durationS ?? trip.totalS;
+      const durationS = trip.totalS > 0 ? (r.stats.durationS * totalS) / trip.totalS : r.stats.durationS;
+      const share = rover ? trip.resource / ROVER_BATTERY_WH : trip.resource;
+      const resource = `${Number.isFinite(share) ? Math.round(share * 100) : '—'} % ${rover ? 'battery' : 'suit energy'}`;
+      const whole = trip.oneWay ? 'One way to shelter' : `There and back ${formatDuration(totalS)}`;
       return `<button class="route ${index === this.selected ? 'active' : ''}" data-route="${index}">
         <b>${r.label}</b>
         <span class="chip" style="--tone:${RATING_COLORS[r.stats.worst]}">${r.stats.worst}</span>
         <span>${formatDuration(durationS)} · ${(r.stats.distanceM / 1000).toFixed(2)} km</span>
-        <span>${resource} · ${(this.timings[index]?.doseUSv ?? r.stats.doseUSv).toFixed(1)} µSv</span>
+        <span>${whole}</span>
+        <span>${resource} · ${(this.timings[index]?.doseUSv ?? trip.doseUSv).toFixed(1)} µSv</span>
         <span>max slope ${r.stats.maxSlopeDeg.toFixed(0)}° · climb ${r.stats.ascentM.toFixed(0)} m</span>
         ${r.stops.length ? `<span class="science">via ${r.stops.map(escapeHtml).join(', ')}</span>` : ''}
       </button>`;
@@ -647,8 +651,12 @@ export class Hud {
     const drawing = this.tool === 'draw';
     const timing = this.timings[this.selected];
     const tone = timing?.verdict === 'NO-GO' ? '#ff3b3b' : timing?.verdict === 'GO WITH CARE' ? '#ffd23f' : '#3ddc84';
+    const check = route.stats.trip;
+    const checkTone = check.verdict === 'FAIL' ? '#ff3b3b' : check.verdict === 'MARGINAL' ? '#ffd23f' : '#3ddc84';
+    const checkLine = `<li id="trip-check" style="--tone:${checkTone}"><b>${check.verdict}</b> ${check.oneWay ? '' : 'Round trip with 30 min at the stop. '}${escapeHtml(check.reason)}</li>`;
     const timingLine = timing ? `<ul class="warnings timing">
-        <li style="--tone:${tone}"><b>${timing.verdict}</b> leaving ${clock(timing.startHour)}, arriving ${clock(timing.endHour)} · air ${timing.minAirC.toFixed(0)} to ${timing.maxAirC.toFixed(0)} °C · sun ${timing.minSunDeg < 0 ? 'below the horizon' : `at least ${timing.minSunDeg.toFixed(0)}° up`}</li>
+        ${checkLine}
+        <li style="--tone:${tone}"><b>${timing.verdict}</b> leaving ${clock(timing.startHour)}, ${check.oneWay ? 'arriving' : 'back by'} ${clock(timing.endHour)} · air ${timing.minAirC.toFixed(0)} to ${timing.maxAirC.toFixed(0)} °C · sun ${timing.minSunDeg < 0 ? 'below the horizon' : `at least ${timing.minSunDeg.toFixed(0)}° up`}</li>
         ${timing.warnings.slice(0, 2).map((w) => `<li style="--tone:${tone}">${escapeHtml(w)}</li>`).join('')}
         ${timing.betterStart !== null ? `<li style="--tone:#6fd6ee">Better: leave at ${clock(timing.betterStart)}. <button class="link" data-action="best-time">Set that time</button></li>` : ''}
       </ul>` : '';

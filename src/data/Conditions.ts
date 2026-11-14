@@ -1,3 +1,4 @@
+import { MODEL } from '../planning/Models';
 import type { SpaceWeather, Weather } from './Environment';
 
 /** 'clear' is the measured MEDA sol. 'dust' and 'solar' are modelled drills, labelled as such in the UI. */
@@ -63,8 +64,8 @@ export function assess(scenario: Scenario, weather: Weather, space: SpaceWeather
     tau,
     windMs,
     speedFactor: dust ? 0.7 : 1,
-    // Assumption for the drill: a strong particle event roughly doubles the surface dose rate.
-    doseFactor: solarStorm ? 2 : 1,
+    // Curiosity's RAD saw the surface dose rate rise 2 to 3 times in the September 2017 storm; the drill uses the top of that.
+    doseFactor: solarStorm ? MODEL.stormDose.value : 1,
     solarWm2: solarFlux(weather.sunElevationDeg, tau),
     haze: dust ? 9 : 1,
     verdict,

@@ -12,9 +12,11 @@ import { Analysis, doseRate, type LayerId, type SunSample } from '../planning/An
 import { Lander } from '../world/Lander';
 import { BaseSiteScorer, type BaseScore } from '../planning/BaseSite';
 import {
-  ROVER_BATTERY_WH, RATINGS, Router, SUIT_BUDGET_S, formatDuration, rate, roverEnergyWh, speedFactor, toCSV, toGeoJSON,
-  type Route, type RoutePoint,
+  ROVER_BATTERY_WH, RATINGS, Router, formatDuration, rate, toCSV, toGeoJSON,
+  type Route, type RoutePoint, type TripContext,
 } from '../planning/Router';
+import { Contingency } from '../planning/Contingency';
+import { SUIT_ENERGY_J, SUIT_WORK_S, WORK_RATE_W, gradeDeg, pace, travelEnergyJ } from '../planning/Models';
 import { clock, timeRoute } from '../planning/Timeline';
 import { Hud, type Tool, type ViewId } from '../ui/Hud';
 import { Globe, SITES } from '../world/Globe';
@@ -29,6 +31,8 @@ import { Terrain } from '../world/Terrain';
 const PANEL_W_PER_WM2 = 8 * 0.27;
 /** Breathable air the rover cabin carries for one person, modelled: three days. */
 const CABIN_AIR_S = 72 * 3600;
+/** A camped crew refills a suit from the rover in this long (our assumption). */
+const SUIT_REFILL_S = 2 * 3600;
 /** Parked this close to the lander, the rover refills its cabin air from it, metres. */
 const RESUPPLY_RANGE = 40;
 /** How fast the crew crosses to the airlock, m/s on screen. */
@@ -101,7 +105,8 @@ export class Game {
   private drawPoints: RoutePoint[] = [];
   private lastBase: BaseScore | null = null;
   private doseTotal = 0;
-  private suitSeconds = 0;
+  /** Suit energy spent since the last fill, joules. */
+  private suitJ = 0;
   private energyWh = 0;
   /** Cabin air used, in person-seconds. Camping and suit refills draw on it; the lander refills it. */
   private cabinSeconds = 0;
@@ -110,6 +115,8 @@ export class Game {
   private transfer: { boarding: boolean; camp: boolean; to: THREE.Vector3 } | null = null;
   private doorTimer = 0;
   private hudTimer = 0;
+  private homeOnFoot!: Contingency;
+  private homeFromRover!: Contingency;
   private sunsetWarned = false;
   private camping = false;
   private campWasNoGo = false;
@@ -187,6 +194,8 @@ export class Game {
     this.analysis = new Analysis(this.site);
     this.analysis.setThermal(thermal.pixels, thermal.size);
     this.router = new Router(this.analysis);
+    this.homeOnFoot = new Contingency(this.analysis);
+    this.homeFromRover = new Contingency(this.analysis);
     this.markers = new Markers(this.site, mission);
     this.scorer = new BaseSiteScorer(this.analysis, mission.stops);
     this.astronaut = new Astronaut(this.site);
@@ -392,7 +401,7 @@ export class Game {
   private planTo(target: RoutePoint): void {
     this.stopFollowing();
     const explorer = this.active;
-    const routes = this.router.plan(explorer.position, target, explorer.profile, this.markers.mission.stops);
+    const routes = this.router.plan(explorer.position, target, explorer.profile, this.markers.mission.stops, this.tripContext());
     if (!routes.length) {
       this.hud.toast(`No safe way there ${this.traveller === 'rover' ? 'for the rover' : 'on foot'}: it is cut off by no-go slopes.`);
       return;
@@ -403,6 +412,16 @@ export class Game {
     this.markers.setDestination(this.destination);
     this.markers.setPins([]);
     this.showRoutes(routes, 0);
+  }
+
+  /** Where shelter is and what is left in the suit or battery, for checking a whole trip. */
+  private tripContext(): TripContext {
+    const rover = this.traveller === 'rover';
+    // On foot the parked rover is a shelter too; a rover trip is checked against a walk back to the lander.
+    const shelters = rover ? [this.base] : [this.base, { x: this.rover.position.x, z: this.rover.position.z }];
+    const contingency = rover ? this.homeFromRover : this.homeOnFoot;
+    contingency.update(shelters);
+    return { contingency, shelters, reserve: Math.max(0, rover ? 1 - this.energyWh / ROVER_BATTERY_WH : 1 - this.suitJ / SUIT_ENERGY_J) };
   }
 
   private showRoutes(routes: Route[], selected: number): void {
@@ -495,7 +514,7 @@ export class Game {
     this.clearRoutes();
     this.rover.speed = 0;
     this.camping = true;
-    this.campWasNoGo = (this.conditions?.verdict ?? 'GO') === 'NO-GO' || this.suitSeconds > 0;
+    this.campWasNoGo = (this.conditions?.verdict ?? 'GO') === 'NO-GO' || this.suitJ > 0;
     this.scaleBeforeCamp = this.timeScale;
     this.setTimeScale(CAMP_TIME_SCALE);
     this.hud.toast('Camping in the rover. Time runs fast while you wait: the suit refills from the cabin and the solar wings charge the battery.');
@@ -523,11 +542,11 @@ export class Game {
     this.analysis.setSolarDay(this.scenario, samples, 1);
   }
 
-  /** Each shown route checked against the hours it would actually cover, starting now. */
+  /** Each shown route checked against the hours the whole trip would cover, starting now. */
   private timings() {
     // Dust slows travel, so the trip takes longer and collects more dose than on a clear sol.
     const slow = 1 / (this.conditions?.speedFactor ?? 1);
-    return this.routes.map((route) => timeRoute(this.environment, this.scenario, this.hour, route.stats.durationS * slow, route.stats.doseUSv * slow));
+    return this.routes.map((route) => timeRoute(this.environment, this.scenario, this.hour, route.stats.trip.totalS * slow, route.stats.trip.doseUSv * slow));
   }
 
   private frameAround(point: RoutePoint, radius: number): void {
@@ -580,15 +599,16 @@ export class Game {
 
   private refreshDrawing(): void {
     this.markers.setPins(this.drawPoints.slice(1));
-    this.showRoutes(this.drawPoints.length > 1 ? [this.router.evaluate(this.drawPoints, this.active.profile, 'custom', 'My route')] : [], 0);
+    this.showRoutes(this.drawPoints.length > 1 ? [this.router.evaluate(this.drawPoints, this.active.profile, 'custom', 'My route', this.tripContext())] : [], 0);
   }
 
   /** Put the hand-drawn route next to the planner's routes to the same end point. */
   private finishDraw(): void {
     if (this.drawPoints.length < 2) return;
-    const custom = this.router.evaluate(this.drawPoints, this.active.profile, 'custom', 'My route');
+    const context = this.tripContext();
+    const custom = this.router.evaluate(this.drawPoints, this.active.profile, 'custom', 'My route', context);
     const goal = this.drawPoints[this.drawPoints.length - 1];
-    const planned = this.router.plan(this.drawPoints[0], goal, this.active.profile, this.markers.mission.stops);
+    const planned = this.router.plan(this.drawPoints[0], goal, this.active.profile, this.markers.mission.stops, context);
     this.destination = goal;
     this.markers.setDestination(goal);
     this.showRoutes([custom, ...planned], 0);
@@ -610,7 +630,7 @@ export class Game {
     this.astronaut.place(point.x - 4, point.z + 5, FACE_LANDER);
     this.lastPosition.copy(this.active.position);
     this.doseTotal = 0;
-    this.suitSeconds = 0;
+    this.suitJ = 0;
     this.energyWh = 0;
     this.cabinSeconds = 0;
     this.hud.hideCard();
@@ -686,8 +706,12 @@ export class Game {
     const lengths = this.followLengths;
     const explorer = this.active;
     const profile = explorer.profile;
-    const cell = this.analysis.index(explorer.position.x, explorer.position.z);
-    const speed = profile.speed * speedFactor(this.analysis.effectiveSlope(cell), profile) * this.timeScale * (this.conditions?.speedFactor ?? 1);
+    // Pace follows the slope along the heading, exactly as the planner timed it.
+    const { x: px, z: pz } = explorer.position;
+    const fx = Math.sin(explorer.heading) * 2;
+    const fz = Math.cos(explorer.heading) * 2;
+    const grade = gradeDeg(this.site.groundAt(px + fx, pz + fz) - this.site.groundAt(px - fx, pz - fz), 4);
+    const speed = pace(profile.mode, grade) * this.timeScale * (this.conditions?.speedFactor ?? 1);
     this.followDistance += speed * dt;
     const total = lengths[lengths.length - 1];
     if (this.followDistance >= total) {
@@ -836,8 +860,12 @@ export class Game {
     const shield = this.camping ? CAMP_DOSE_FACTOR : 1;
     this.doseTotal += (doseRate(this.analysis.skyView[cell]) * (this.conditions?.doseFactor ?? 1) * shield * missionSeconds) / 3600;
     const moved = Math.hypot(explorer.position.x - this.lastPosition.x, explorer.position.z - this.lastPosition.z);
-    if (this.traveller === 'astronaut') this.suitSeconds += missionSeconds;
-    else this.energyWh += roverEnergyWh(moved, explorer.position.y - this.lastPosition.y);
+    // Moving costs the Santee (on foot) or Carr (rover) energy for the slope actually covered; standing costs the Apollo work rate.
+    const travelJ = moved > 1e-3 && missionSeconds > 0
+      ? travelEnergyJ(this.traveller, moved, gradeDeg(explorer.position.y - this.lastPosition.y, moved), moved / missionSeconds)
+      : 0;
+    if (this.traveller === 'astronaut') this.suitJ += travelJ || WORK_RATE_W * missionSeconds;
+    else this.energyWh += travelJ / 3600;
     // The rover's panel charges its battery wherever it stands; a camped crew tops the suit up from the rover.
     const roverCell = this.analysis.index(this.rover.position.x, this.rover.position.z);
     const panelW = this.analysis.solarAt(roverCell, this.sunSample(this.hour, this.scenario)) * PANEL_W_PER_WM2;
@@ -847,9 +875,9 @@ export class Game {
     if (landerAway <= RESUPPLY_RANGE) this.cabinSeconds = Math.max(0, this.cabinSeconds - missionSeconds * 20);
     if (this.traveller === 'rover') {
       // Whoever is inside breathes cabin air; a camped crew also refills the suit from it.
-      const refill = this.camping && this.cabinSeconds < CABIN_AIR_S ? Math.min(this.suitSeconds, missionSeconds * 4) : 0;
-      this.suitSeconds -= refill;
-      this.cabinSeconds = Math.min(CABIN_AIR_S, this.cabinSeconds + missionSeconds + refill);
+      const refillJ = this.camping && this.cabinSeconds < CABIN_AIR_S ? Math.min(this.suitJ, (SUIT_ENERGY_J * missionSeconds) / SUIT_REFILL_S) : 0;
+      this.suitJ -= refillJ;
+      this.cabinSeconds = Math.min(CABIN_AIR_S, this.cabinSeconds + missionSeconds + (refillJ / SUIT_ENERGY_J) * SUIT_WORK_S);
       if (this.cabinSeconds < CABIN_AIR_S * 0.85) this.cabinWarned = false;
       else if (!this.cabinWarned) {
         this.cabinWarned = true;
@@ -857,7 +885,7 @@ export class Game {
       }
     }
     if (this.camping) {
-      const ready = this.conditions?.verdict !== 'NO-GO' && this.suitSeconds === 0;
+      const ready = this.conditions?.verdict !== 'NO-GO' && this.suitJ === 0;
       if (!ready) this.campWasNoGo = true;
       else if (this.campWasNoGo) {
         this.campWasNoGo = false;
@@ -877,7 +905,7 @@ export class Game {
     const weather = this.environment.at(this.hour);
     const { lat, lon } = this.site.toLatLon(x, z);
     const rover = this.traveller === 'rover';
-    const reserve = rover ? 1 - this.energyWh / ROVER_BATTERY_WH : 1 - this.suitSeconds / SUIT_BUDGET_S;
+    const reserve = rover ? 1 - this.energyWh / ROVER_BATTERY_WH : 1 - this.suitJ / SUIT_ENERGY_J;
     const space = this.environment.spaceWeather;
     const conditions = this.conditions ?? assess(this.scenario, weather, space);
     const sun = this.sunSample(this.hour, this.scenario);
@@ -909,7 +937,7 @@ export class Game {
       reserve,
       reserveText: rover
         ? `Battery ${Math.round(Math.max(0, reserve) * 100)} % · ${(explorer.odometer / 1000).toFixed(2)} km driven`
-        : `Suit time left ${formatDuration(Math.max(0, SUIT_BUDGET_S - this.suitSeconds))} of 8 h · ${(explorer.odometer / 1000).toFixed(2)} km walked`,
+        : `Suit energy ${Math.round(Math.max(0, reserve) * 100)} % · about ${formatDuration(Math.max(0, reserve) * SUIT_WORK_S)} of work left · ${(explorer.odometer / 1000).toFixed(2)} km walked`,
       spaceStatus: space.status, spaceHeadline: space.headline, spaceDetail: space.detail,
       guidance: this.guidance(),
     });

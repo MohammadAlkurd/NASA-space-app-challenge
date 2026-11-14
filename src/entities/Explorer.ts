@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MODEL, gradeDeg, pace } from '../planning/Models';
 import type { SiteData } from '../world/SiteData';
 
 export type TravelMode = 'rover' | 'astronaut';
@@ -15,13 +16,12 @@ export interface TravelProfile {
 }
 
 /**
- * Limits used for both driving and route planning.
- * Rover: crew rover at 10 km/h (Apollo LRV class); slopes over 25 deg are no-go.
- * Astronaut: suited walking pace 0.9 m/s (Apollo EVA traverses ran ~0.6-1.1 m/s); slopes over 20 deg are no-go.
+ * Limits used for both driving and route planning; speeds and their sources are in planning/Models.ts.
+ * Slope limits are our assumptions: the rover's 25 deg no-go matches the steepest slopes the Apollo rovers drove (22-25 deg).
  */
 export const PROFILES: Record<TravelMode, TravelProfile> = {
-  rover: { mode: 'rover', label: 'Crew rover', speed: 2.8, maxSlope: 25, cautionSlope: 15 },
-  astronaut: { mode: 'astronaut', label: 'Astronaut on foot', speed: 0.9, maxSlope: 20, cautionSlope: 12 },
+  rover: { mode: 'rover', label: 'Crew rover', speed: MODEL.roverSpeed.value, maxSlope: 25, cautionSlope: 15 },
+  astronaut: { mode: 'astronaut', label: 'Astronaut on foot', speed: MODEL.walkPlanSpeed.value, maxSlope: 20, cautionSlope: 12 },
 };
 
 export interface ControlInput {
@@ -52,26 +52,23 @@ export abstract class Explorer {
   protected move(input: ControlInput, dt: number, timeScale: number, turnRate: number): void {
     const field = this.site.local;
     const profile = this.profile;
-    const target = input.throttle * profile.speed * timeScale * (input.throttle < 0 ? 0.5 : 1);
-    const rate = Math.abs(target) > Math.abs(this.speed) ? 2.4 : 5;
-    this.speed += (target - this.speed) * Math.min(1, rate * dt);
-    if (Math.abs(this.speed) < 0.01 && input.throttle === 0) this.speed = 0;
-
-    const direction = this.speed < -0.05 ? -1 : 1;
+    const direction = this.speed < -0.05 || (this.speed <= 0.05 && input.throttle < 0) ? -1 : 1;
     this.heading -= input.steer * turnRate * dt * direction;
     this.forward.set(Math.sin(this.heading), 0, Math.cos(this.heading));
 
     const x = this.position.x;
     const z = this.position.z;
     this.slopeDeg = field.slopeDegAt(x, z, 2.5);
-    // Grade along the direction of travel slows climbing.
+    // The pace follows the slope along the direction of travel, as in the route planner.
     const ahead = field.heightAt(x + this.forward.x * 2, z + this.forward.z * 2);
     const behind = field.heightAt(x - this.forward.x * 2, z - this.forward.z * 2);
-    const grade = ((ahead - behind) / 4) * direction;
-    const slowdown = THREE.MathUtils.clamp(1 - Math.max(grade, 0) * 1.6, 0.35, 1) *
-      (this.slopeDeg > profile.cautionSlope ? 0.7 : 1);
+    const top = pace(profile.mode, gradeDeg((ahead - behind) * direction, 4));
+    const target = input.throttle * top * timeScale * (input.throttle < 0 ? 0.5 : 1);
+    const rate = Math.abs(target) > Math.abs(this.speed) ? 2.4 : 5;
+    this.speed += (target - this.speed) * Math.min(1, rate * dt);
+    if (Math.abs(this.speed) < 0.01 && input.throttle === 0) this.speed = 0;
 
-    const step = this.speed * slowdown * dt;
+    const step = this.speed * dt;
     const nx = x + this.forward.x * step;
     const nz = z + this.forward.z * step;
     const look = Math.sign(step) * 1.5;

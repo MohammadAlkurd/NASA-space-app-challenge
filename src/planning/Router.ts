@@ -1,7 +1,13 @@
 import type { TravelProfile } from '../entities/Explorer';
 import { Analysis, GRID, doseRate } from './Analysis';
+import type { Contingency } from './Contingency';
+import {
+  MODEL, ROVER_BATTERY_WH, SHELTER_WALK_S, STOP_S, SUIT_ENERGY_J, WORK_RATE_W, gradeDeg, pace, travelEnergyJ,
+} from './Models';
 
-export type RouteKind = 'safest' | 'fastest' | 'science' | 'shielded' | 'custom';
+export { ROVER_BATTERY_WH } from './Models';
+
+export type RouteKind = 'safest' | 'fastest' | 'effort' | 'science' | 'shielded' | 'custom';
 export type Rating = 'SAFE' | 'BE CAREFUL' | 'DANGER' | 'NO-GO';
 export const RATINGS: Rating[] = ['SAFE', 'BE CAREFUL', 'DANGER', 'NO-GO'];
 
@@ -27,11 +33,37 @@ export interface RouteStats {
   descentM: number;
   maxSlopeDeg: number;
   doseUSv: number;
-  /** Rover: battery energy in Wh. Astronaut: share of an 8 h suit life-support budget, 0..1. */
+  /** Rover: battery energy in Wh. Astronaut: share of one suit's energy budget, 0..1. One way. */
   resource: number;
+  /** The whole outing: there, time at the destination, and back to shelter. */
+  trip: Trip;
   worst: Rating;
   noGoM: number;
   cautionM: number;
+}
+
+export type Feasibility = 'PASS' | 'MARGINAL' | 'FAIL';
+
+export interface Trip {
+  /** True when the route ends at a shelter, so nothing has to be kept for a way back. */
+  oneWay: boolean;
+  /** Seconds for the whole outing. */
+  totalS: number;
+  /** Same unit as `RouteStats.resource`, for the whole outing. */
+  resource: number;
+  doseUSv: number;
+  /** Longest walk to a pressurised shelter from any point of the route, seconds at the emergency pace. */
+  shelterS: number;
+  verdict: Feasibility;
+  /** The rule that decides the verdict, in plain words. */
+  reason: string;
+}
+
+/** What a trip is checked against: where shelter is, and how much of the suit or battery is left now (0..1). */
+export interface TripContext {
+  contingency: Contingency;
+  shelters: RoutePoint[];
+  reserve: number;
 }
 
 export interface Route {
@@ -50,30 +82,16 @@ export interface ScienceTarget extends RoutePoint {
   name: string;
 }
 
-// Rover energy model (documented in the Sources panel): rolling resistance + climbing,
-// pressurised crew rover of 3000 kg (the class of NASA's Space Exploration Vehicle concept),
-// Mars gravity 3.71 m/s^2, drivetrain efficiency 0.5.
-const ROVER_MASS = 3000;
-const MARS_G = 3.71;
-const ROLLING = 0.15;
-const DRIVE_EFFICIENCY = 0.5;
-export const ROVER_BATTERY_WH = 30000;
+/** Suit effort of walking on level ground at the planned pace, watts. */
+const LEVEL_WALK_W = travelEnergyJ('astronaut', 1, 0, pace('astronaut', 0)) * pace('astronaut', 0);
 
-/** Battery energy to drive `distance` metres while climbing `climb` metres. */
-export function roverEnergyWh(distance: number, climb: number): number {
-  return (ROLLING * ROVER_MASS * MARS_G * distance + ROVER_MASS * MARS_G * Math.max(climb, 0)) / DRIVE_EFFICIENCY / 3600;
-}
-export const SUIT_BUDGET_S = 8 * 3600;
+/** Close enough to a shelter to count as arriving at it, metres. */
+const AT_SHELTER = 30;
 
 const NEIGHBOURS = [
   [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
   [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
 ];
-
-/** Fraction of flat-ground speed kept on a slope. */
-export function speedFactor(slope: number, profile: TravelProfile): number {
-  return Math.max(0.25, 1 - 0.75 * Math.min(1, slope / profile.maxSlope));
-}
 
 export function rate(slope: number, roughness: number, profile: TravelProfile): { rating: Rating; reason: string } {
   const mid = (profile.cautionSlope + profile.maxSlope) / 2;
@@ -140,7 +158,7 @@ export class Router {
   constructor(private readonly analysis: Analysis) {}
 
   /** Up to four alternative routes between two points for this traveller. */
-  plan(start: RoutePoint, goal: RoutePoint, profile: TravelProfile, science: ScienceTarget[]): Route[] {
+  plan(start: RoutePoint, goal: RoutePoint, profile: TravelProfile, science: ScienceTarget[], context: TripContext): Route[] {
     const routes: Route[] = [];
     const add = (kind: RouteKind, label: string, via: ScienceTarget[] = []) => {
       const legs = [start, ...via, goal];
@@ -151,7 +169,7 @@ export class Router {
         if (points.length) leg.shift();
         points.push(...leg);
       }
-      const route = this.evaluate(points, profile, kind, label);
+      const route = this.evaluate(points, profile, kind, label, context);
       route.stops = via.map((stop) => stop.name);
       // Two goals often give the same path; show it once under both names.
       const same = routes.find((r) => Math.abs(r.stats.distanceM - route.stats.distanceM) < 0.01 * route.stats.distanceM
@@ -161,6 +179,7 @@ export class Router {
     };
     add('safest', 'Safest');
     add('fastest', 'Fastest');
+    if (profile.mode === 'astronaut') add('effort', 'Least effort');
     add('shielded', 'Low radiation');
     // Science-rich: detour through up to three science stops that lie near the direct line.
     const direct = Math.hypot(goal.x - start.x, goal.z - start.z);
@@ -180,7 +199,7 @@ export class Router {
   }
 
   /** Rate and measure any polyline (planned or hand-drawn). Points are resampled to ~10 m. */
-  evaluate(input: RoutePoint[], profile: TravelProfile, kind: RouteKind, label: string): Route {
+  evaluate(input: RoutePoint[], profile: TravelProfile, kind: RouteKind, label: string, context: TripContext): Route {
     const analysis = this.analysis;
     const points: RoutePoint[] = [];
     for (let k = 0; k < input.length; k += 1) {
@@ -199,10 +218,16 @@ export class Router {
     const stats: RouteStats = {
       distanceM: 0, durationS: 0, ascentM: 0, descentM: 0, maxSlopeDeg: 0, doseUSv: 0, resource: 0,
       worst: 'SAFE', noGoM: 0, cautionM: 0,
+      trip: { oneWay: false, totalS: 0, resource: 0, doseUSv: 0, shelterS: 0, verdict: 'PASS', reason: '' },
     };
+    const mover = profile.mode;
+    // The same path walked the other way: slopes reverse, so time and energy differ.
+    const back = { s: 0, j: 0, dose: 0 };
+    /** Energy spent on reaching each point, joules. */
+    const usedJ = [0];
     const ratings: Rating[] = [];
     const segments: Segment[] = [];
-    let energyWh = 0;
+    let energyJ = 0;
     const field = analysis.site.local;
     for (let k = 0; k < points.length - 1; k += 1) {
       const a = points[k];
@@ -212,14 +237,21 @@ export class Router {
       const slope = analysis.effectiveSlope(cell);
       const { rating, reason } = rate(slope, analysis.roughness[cell], profile);
       const climb = field.heightAt(b.x, b.z) - field.heightAt(a.x, a.z);
-      const time = length / (profile.speed * speedFactor(slope, profile));
+      const grade = gradeDeg(climb, length);
+      const speed = pace(mover, grade);
+      const time = length / speed;
+      const speedBack = pace(mover, -grade);
+      back.s += length / speedBack;
+      back.j += travelEnergyJ(mover, length, -grade, speedBack);
+      back.dose += (doseRate(analysis.skyView[cell]) * length) / speedBack / 3600;
       stats.distanceM += length;
       stats.durationS += time;
       if (climb > 0) stats.ascentM += climb;
       else stats.descentM -= climb;
       stats.maxSlopeDeg = Math.max(stats.maxSlopeDeg, slope);
       stats.doseUSv += (doseRate(analysis.skyView[cell]) * time) / 3600;
-      energyWh += roverEnergyWh(length, climb);
+      energyJ += travelEnergyJ(mover, length, grade, speed);
+      usedJ.push(energyJ);
       if (rating === 'NO-GO') stats.noGoM += length;
       if (rating !== 'SAFE') stats.cautionM += length;
       if (RATINGS.indexOf(rating) > RATINGS.indexOf(stats.worst)) stats.worst = rating;
@@ -235,8 +267,78 @@ export class Router {
       }
     }
     ratings.push(ratings[ratings.length - 1] ?? 'SAFE');
-    stats.resource = profile.mode === 'rover' ? energyWh : stats.durationS / SUIT_BUDGET_S;
+    stats.resource = mover === 'rover' ? energyJ / 3600 : energyJ / SUIT_ENERGY_J;
+    stats.trip = this.trip(points, profile, stats, back, usedJ, context);
     return { kind, label, points, ratings, segments, stats, stops: [] };
+  }
+
+  /** The whole outing checked against the hard limits: energy to get back, and the walk to shelter. */
+  private trip(
+    points: RoutePoint[], profile: TravelProfile, out: RouteStats, back: { s: number; j: number; dose: number },
+    usedJ: number[], context: TripContext,
+  ): Trip {
+    const analysis = this.analysis;
+    const { contingency, shelters, reserve } = context;
+    const rover = profile.mode === 'rover';
+    const budgetJ = rover ? ROVER_BATTERY_WH * 3600 : SUIT_ENERGY_J;
+    const unit = (joules: number) => (rover ? joules / 3600 : joules / SUIT_ENERGY_J);
+    const near = (p: RoutePoint) => shelters.some((s) => Math.hypot(s.x - p.x, s.z - p.z) <= AT_SHELTER);
+    const cells = points.map((p) => analysis.index(p.x, p.z));
+    const endCell = cells[cells.length - 1];
+    const oneWay = near(points[points.length - 1]);
+    const outJ = usedJ[usedJ.length - 1];
+    let shelterS = 0;
+    let farJ = 0;
+    for (const cell of cells) {
+      shelterS = Math.max(shelterS, contingency.homeS[cell]);
+      farJ = Math.max(farJ, contingency.homeJ[cell]);
+    }
+    // The way back: the same path when it started at a shelter (or by rover), else the walk to the nearest shelter.
+    const home = rover || near(points[0])
+      ? back
+      : { s: contingency.homeS[endCell], j: contingency.homeJ[endCell], dose: (doseRate(analysis.skyView[endCell]) * contingency.homeS[endCell]) / 3600 };
+    const stopJ = rover ? 0 : WORK_RATE_W * STOP_S;
+    const needJ = oneWay ? outJ : outJ + stopJ + home.j;
+    const trip: Trip = {
+      oneWay,
+      totalS: oneWay ? out.durationS : out.durationS + STOP_S + home.s,
+      resource: unit(needJ),
+      doseUSv: oneWay ? out.doseUSv : out.doseUSv + (doseRate(analysis.skyView[endCell]) * STOP_S) / 3600 + home.dose,
+      shelterS,
+      verdict: 'PASS',
+      reason: '',
+    };
+    const haveJ = reserve * budgetJ;
+    const leftShare = Math.round(((haveJ - needJ) / budgetJ) * 100);
+    const what = rover ? 'battery' : 'suit energy';
+    const where = oneWay ? 'on arrival' : rover ? 'after the drive back' : 'back at shelter';
+    const set = (verdict: Feasibility, reason: string) => {
+      trip.verdict = verdict;
+      trip.reason = reason;
+    };
+    if (!Number.isFinite(needJ) || !Number.isFinite(shelterS)) {
+      set('FAIL', 'No-go slopes cut part of this route off from shelter on foot.');
+    } else if (needJ > haveJ) {
+      // Last point from which the walk home still fits in what is left.
+      let turn = 0;
+      let along = 0;
+      for (let k = 1; k < points.length; k += 1) {
+        along += Math.hypot(points[k].x - points[k - 1].x, points[k].z - points[k - 1].z);
+        if (!rover && usedJ[k] + contingency.homeJ[cells[k]] <= haveJ) turn = along;
+      }
+      set('FAIL', rover
+        ? `Not enough battery for the trip${oneWay ? '' : ' there and back'}: it needs ${Math.round((needJ / budgetJ) * 100)} %, the rover has ${Math.round(reserve * 100)} %.`
+        : `Not enough suit energy to get ${oneWay ? 'there' : 'back'}: the trip needs ${Math.round((needJ / budgetJ) * 100)} % of a full suit, you have ${Math.round(reserve * 100)} %.${turn > 0 && turn < out.distanceM * 0.95 && !oneWay ? ` Turn back by ${(turn / 1000).toFixed(1)} km.` : ''}`);
+    } else if (rover && farJ > SUIT_ENERGY_J) {
+      set('FAIL', 'If the rover broke down at the far end, the walk back to the lander needs more than one suit holds.');
+    } else if (!rover && shelterS > SHELTER_WALK_S) {
+      set('MARGINAL', `Up to ${Math.round(shelterS / 60)} min from shelter. NASA's suit-failure walk-back test covered ${MODEL.shelterWalk.value} min: park the rover closer.`);
+    } else if (haveJ - needJ < (MODEL.marginal.value / 100) * budgetJ) {
+      set('MARGINAL', `Only ${leftShare} % ${what} left ${where}, under the ${MODEL.marginal.value} % margin.`);
+    } else {
+      set('PASS', `${leftShare} % ${what} left ${where}.`);
+    }
+    return trip;
   }
 
   /** A* over the 10 m grid. Returns null when the goal cannot be reached within the slope limit. */
@@ -254,7 +356,9 @@ export class Router {
     const tx = t % GRID;
     const tz = Math.floor(t / GRID);
     // Admissible: straight-line time at flat-ground speed.
-    const heuristic = (index: number) => (Math.hypot((index % GRID) - tx, Math.floor(index / GRID) - tz) * analysis.cell) / profile.speed;
+    // Effort costs are energy divided by level-ground power; downhill can cost a little less than level, hence the 0.8.
+    const optimism = kind === 'effort' ? 0.8 : 1;
+    const heuristic = (index: number) => (optimism * Math.hypot((index % GRID) - tx, Math.floor(index / GRID) - tz) * analysis.cell) / profile.speed;
     g[s] = 0;
     heap.push(s, heuristic(s));
     while (heap.size) {
@@ -270,7 +374,7 @@ export class Router {
         if (nx < 2 || nz < 2 || nx >= GRID - 2 || nz >= GRID - 2) continue;
         const next = nz * GRID + nx;
         if (closed[next]) continue;
-        const cost = this.stepCost(next, step * analysis.cell, profile, kind, next === t || (escaping && current === s));
+        const cost = this.stepCost(current, next, step * analysis.cell, profile, kind, next === t || (escaping && current === s));
         if (!Number.isFinite(cost)) continue;
         const total = g[current] + cost;
         if (total < g[next]) {
@@ -295,13 +399,17 @@ export class Router {
   }
 
   /** Cost in seconds of entering a cell, weighted by what this route type cares about. */
-  private stepCost(cell: number, length: number, profile: TravelProfile, kind: RouteKind, endpoint: boolean): number {
+  private stepCost(from: number, cell: number, length: number, profile: TravelProfile, kind: RouteKind, endpoint: boolean): number {
     const analysis = this.analysis;
     const slope = analysis.effectiveSlope(cell);
     // The clicked cell is always enterable, so a route can end at a steep target and be rated honestly.
     if (slope >= profile.maxSlope && !endpoint) return Infinity;
-    const time = length / (profile.speed * speedFactor(slope, profile));
+    // Speed and effort follow the slope along the step, so uphill and downhill differ.
+    const grade = gradeDeg(analysis.height[cell] - analysis.height[from], length);
+    const speed = pace(profile.mode, grade);
+    const time = length / speed;
     if (kind === 'fastest') return time;
+    if (kind === 'effort') return travelEnergyJ(profile.mode, length, grade, speed) / LEVEL_WALK_W;
     const over = Math.max(0, slope - profile.cautionSlope) / (profile.maxSlope - profile.cautionSlope);
     const rough = Math.min(1, analysis.roughness[cell] / 0.5);
     if (kind === 'shielded') {
@@ -355,6 +463,8 @@ export function toGeoJSON(route: Route, toLatLon: (x: number, z: number) => { la
         distance_m: Math.round(route.stats.distanceM), duration_min: Math.round(route.stats.durationS / 60),
         ascent_m: Math.round(route.stats.ascentM), max_slope_deg: Number(route.stats.maxSlopeDeg.toFixed(1)),
         dose_uSv: Number(route.stats.doseUSv.toFixed(2)), worst_rating: route.stats.worst, science_stops: route.stops,
+        whole_trip_min: Math.round(route.stats.trip.totalS / 60), whole_trip_dose_uSv: Number(route.stats.trip.doseUSv.toFixed(2)),
+        whole_trip_check: route.stats.trip.verdict, whole_trip_reason: route.stats.trip.reason,
       },
       geometry: { type: 'LineString', coordinates },
     }],

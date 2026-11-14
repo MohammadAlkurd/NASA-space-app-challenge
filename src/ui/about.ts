@@ -1,4 +1,10 @@
 /** "How we built this" panel: challenge fit, data sources, methods, limits, AI use. */
+import { MODEL } from '../planning/Models';
+
+const MODEL_ROWS = Object.values(MODEL)
+  .map((m) => `<tr><td>${m.what}</td><td><b>${m.value} ${m.unit}</b></td><td><span class="label">${m.label}</span> ${m.source}</td></tr>`)
+  .join('');
+
 export const ABOUT_HTML = /* html */ `
 <h2>How this answers the challenge</h2>
 <p class="muted">NASA Space Apps 2026, <b>Interplanetary Survival Guide: Martian Map</b>: a layered, integrated view of a Martian
@@ -7,7 +13,7 @@ location that helps a human explorer plan and carry out a Marswalk safely.</p>
   <tr><th>The challenge asks for</th><th>Where it is in this map</th></tr>
   <tr><td>A layered view of one location from several NASA missions</td><td>Jezero Crater, with five switchable layers from Mars Reconnaissance Orbiter, Mars Odyssey, Mars Global Surveyor, Curiosity and Perseverance</td></tr>
   <tr><td>At least three kinds of data</td><td><b>Optical</b> (HiRISE photo), <b>topographic</b> (HiRISE/MOLA elevation, slope), <b>thermal</b> (THEMIS infrared), <b>atmospheric</b> (MEDA weather), <b>radiation</b> (RAD dose, DONKI solar storms)</td></tr>
-  <tr><td>Astronaut safety, including radiation and space weather</td><td>Live dose rate and trip dose, terrain shelter layer, low-radiation route, NASA DONKI solar-storm status, suit-time budget, slope limits</td></tr>
+  <tr><td>Astronaut safety, including radiation and space weather</td><td>Live dose rate and trip dose, terrain shelter layer, low-radiation route, NASA DONKI solar-storm status, suit energy budget with a walk-back check, slope limits</td></tr>
   <tr><td>Suit mobility and routes around obstacles</td><td>Astronaut and rover have different speed and slope limits. Routes avoid no-go slopes; every risky stretch is rated Safe / Be careful / Danger / No-go with the reason</td></tr>
   <tr><td>A route map to science objectives</td><td>Nine real Perseverance science stops; the Science-rich route visits the ones on your way</td></tr>
   <tr><td>Point-of-view images from surface missions</td><td>Each science stop opens the photo Perseverance's Navcam took at that spot</td></tr>
@@ -29,11 +35,20 @@ location that helps a human explorer plan and carry out a Marswalk safely.</p>
 <h2>What is measured and what is estimated</h2>
 <ul>
   <li><b>Measured:</b> terrain, slopes, photo, weather values, rover positions, photos.</li>
-  <li><b>Estimated:</b> radiation on the ground at Jezero (Perseverance carries no radiation detector, so we scale Curiosity's Gale Crater dose by how much sky each spot sees), UV index (from the sun's height), crew rover energy (a 3000 kg pressurised rover, rolling resistance 0.15 plus climbing, 50 % drive efficiency, 30 kWh battery), cabin air (72 hours for one person, refilled at the lander), walking speed 0.9 m/s and rover speed 2.8 m/s.</li>
+  <li><b>Estimated:</b> radiation on the ground at Jezero (Perseverance carries no radiation detector, so we scale Curiosity's Gale Crater dose by how much sky each spot sees), UV index (from the sun's height), cabin air (72 hours for one person, refilled at the lander), and everything in the planning table below that is not labelled MEASURED.</li>
   <li><b>Solar power (estimated):</b> sunlight from the sun's height and the dust in the air (590 W/m² above the atmosphere, dust optical depth 0.5 on the clear sol), cut where HiRISE terrain shades the spot. Panel output assumes the rover carries 8 m² of panels at 27 % efficiency.</li>
-  <li><b>Storm drills (modelled, not live weather):</b> the dust storm raises dust optical depth to 4, slows travel by 30 % and cuts sunlight; the solar storm doubles the radiation dose. Mars has no hurricanes: its hazards are dust storms, dust devils, wind, cold and solar particle storms. Camping in the rover is assumed to halve the dose.</li>
+  <li><b>Storm drills (modelled, not live weather):</b> the dust storm raises dust optical depth to 4, slows travel by 30 % and cuts sunlight; the solar storm multiplies the radiation dose by 3, the top of what Curiosity measured in the September 2017 storm. Mars has no hurricanes: its hazards are dust storms, dust devils, wind, cold and solar particle storms. Camping in the rover is assumed to halve the dose.</li>
   <li><b>Limits:</b> slope limits are 20° on foot and 25° for the rover. Rocks smaller than the 2.5 m grid are not seen by the planner. Fine surface texture near the camera is procedural. Weather is one real sol, not a forecast.</li>
 </ul>
+
+<h2>Numbers the trip planner uses</h2>
+<p class="muted">Walking pace and effort change with the slope in the direction of travel, so uphill and downhill differ. Every trip is checked for the way back: there, 30 minutes at the stop, and home to shelter (the lander or the parked rover).
+<b>MEASURED</b> = Mars instruments. <b>ANALOG</b> = Apollo or NASA suit tests on Earth and the Moon. <b>NASA STUDY</b> = NASA design documents. <b>ASSUMPTION</b> = our choice.</p>
+<table class="model">
+  <tr><th>What</th><th>Value</th><th>Where it comes from</th></tr>
+  ${MODEL_ROWS}
+</table>
+<p class="muted small">Known limits: the walking-effort formula was fitted on Earth and its level-ground part is not scaled for gravity. The rover formula comes from Apollo rover data; scaling its level-ground part to Mars gravity is our assumption. Oxygen and cooling water are listed for reference and are not yet tracked separately from suit energy.</p>
 
 <h2>Tools and AI use</h2>
 <p>Built with three.js, TypeScript and Vite; data prepared with Python (rasterio, NumPy, Pillow). The rover is our own model.

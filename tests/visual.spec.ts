@@ -17,7 +17,10 @@ async function canvasIsNonBlank(page: Page): Promise<{ ok: boolean; variance: nu
 }
 
 type Mars = {
-  planToStop(id: string): { label: string; distanceM: number; durationS: number; worst: string; noGoM: number }[];
+  planToStop(id: string): {
+    label: string; distanceM: number; durationS: number; worst: string; noGoM: number;
+    trip: { oneWay: boolean; totalS: number; resource: number; verdict: string };
+  }[];
   go(): void;
   setTimeScale(scale: number): void;
   setLayer(layer: string): void;
@@ -60,6 +63,15 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   expect(routes[0].noGoM).toBe(0);
   expect(routes[0].distanceM).toBeGreaterThan(500);
   await expect(page.locator('#planner .route')).toHaveCount(routes.length);
+
+  // A Marswalk is checked there and back: travel out, 30 min at the stop, and the way home.
+  const trip = routes[0].trip;
+  expect(trip.oneWay).toBe(false);
+  expect(trip.totalS).toBeGreaterThan(2 * routes[0].durationS + 1700);
+  expect(trip.resource).toBeGreaterThan(0.05);
+  expect(trip.resource).toBeLessThan(0.6);
+  expect(trip.verdict).toBe('PASS');
+  await expect(page.locator('#trip-check')).toContainText('PASS');
 
   // Boarding the rover keeps the planned trip and re-plans it for the rover.
   await page.evaluate(() => (window.__MARS__ as Mars).setTraveller('rover'));
