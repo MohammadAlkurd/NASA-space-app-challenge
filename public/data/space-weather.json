@@ -1,0 +1,8 @@
+{
+ "source": "NASA DONKI (Space Weather Database Of Notifications, Knowledge, Information), CCMC",
+ "fetchedAt": "2026-11-14T10:54:30.003Z",
+ "windowDays": 7,
+ "sepEvents": [],
+ "cmeCount": 20,
+ "fastCmes": []
+}
