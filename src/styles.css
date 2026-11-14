@@ -81,6 +81,7 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; heigh
 #topbar { top: 0; left: var(--rail); right: var(--rail); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .bar-group { display: flex; align-items: center; gap: 8px; }
 .bar-group > span { font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+#t-clock { min-width: 12ch; font: 500 18px var(--font-data); color: var(--text); white-space: nowrap; }
 #topbar button { min-height: 30px; padding: 6px 8px; font-size: 13px; white-space: nowrap; }
 #home-button { border-color: var(--science); color: var(--science); }
 #about-button { margin-left: auto; }

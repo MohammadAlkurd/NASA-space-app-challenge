@@ -18,6 +18,7 @@ export interface Telemetry {
   rating: Rating;
   reason: string;
   hour: number;
+  sol: number;
   airTempC: number;
   groundTempC: number;
   pressurePa: number;
@@ -184,7 +185,7 @@ export class Hud {
           <div><dt>Slope</dt><dd id="t-slope"></dd></div>
         </dl>
         <div class="clock">
-          <label for="hour">Local time <b id="t-hour"></b></label>
+          <label for="hour">Jump to a time <b id="t-hour"></b></label>
           <input id="hour" type="range" min="0" max="23.75" step="0.25" value="10" />
           <div class="segmented small" id="speed">
             <button data-scale="1">Real time</button>
@@ -192,7 +193,7 @@ export class Hud {
             <button data-scale="20">×20</button>
             <button data-scale="60">×60</button>
           </div>
-          <p class="muted small">The Mars clock runs with your travel: rover 2.8 m/s, on foot 0.9 m/s. Speed-up moves you and the clock together.</p>
+          <p class="muted small">The Mars clock always runs. Speed-up moves you and the clock together.</p>
         </div>
       </aside>
 
@@ -213,6 +214,10 @@ export class Hud {
       </aside>
 
       <nav id="topbar" class="panel" hidden>
+        <div class="bar-group" id="mars-clock" title="Mars local time at the site. It runs on its own; the buttons under the readouts speed it up.">
+          <span>Mars time</span>
+          <b id="t-clock"></b>
+        </div>
         <div class="bar-group">
           <span>View</span>
           <div class="segmented small" id="view">
@@ -267,7 +272,10 @@ export class Hud {
       const scale = Number((event.target as HTMLElement).dataset.scale);
       if (scale) actions.setTimeScale(scale);
     });
-    el<HTMLInputElement>(this.root, '#hour').addEventListener('input', (event) => actions.setHour(Number((event.target as HTMLInputElement).value)));
+    const hour = el<HTMLInputElement>(this.root, '#hour');
+    hour.addEventListener('input', () => actions.setHour(Number(hour.value)));
+    // Let go of the slider once a time is picked, so it follows the running clock again.
+    hour.addEventListener('change', () => hour.blur());
     el<HTMLInputElement>(this.root, '#traverse').addEventListener('change', (event) => actions.setTraverseVisible((event.target as HTMLInputElement).checked));
     el(this.root, '#shelter-button').addEventListener('click', () => actions.shelter());
     el(this.root, '#near-route').addEventListener('click', () => this.nearStop && actions.routeToStop(this.nearStop));
@@ -418,8 +426,9 @@ export class Hud {
     space.dataset.status = t.spaceStatus;
     space.title = t.spaceDetail;
     set('#t-space dd', t.spaceHeadline);
-    const hours = Math.floor(t.hour);
-    set('#t-hour', `${String(hours).padStart(2, '0')}:${String(Math.floor((t.hour - hours) * 60)).padStart(2, '0')}`);
+    const time = clock(t.hour);
+    set('#t-hour', time);
+    set('#t-clock', `Sol ${t.sol} · ${time}:${String(Math.floor((t.hour * 3600) % 60)).padStart(2, '0')}`);
     const slider = el<HTMLInputElement>(this.root, '#hour');
     if (document.activeElement !== slider) slider.value = String(t.hour);
     const guidance = el(this.root, '#guidance');

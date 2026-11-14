@@ -86,6 +86,8 @@ export class Game {
   private groundMode: CameraMode = 'chase';
   private timeScale = 5;
   private hour = 10;
+  /** Sols since landing; the clock rolls over at midnight. */
+  private sol = 1;
   private routes: Route[] = [];
   private selected = 0;
   private following = false;
@@ -814,7 +816,12 @@ export class Game {
   private account(dt: number): void {
     const explorer = this.active;
     const missionSeconds = dt * this.timeScale;
-    this.hour = (this.hour + missionSeconds / HOUR_SECONDS) % 24;
+    this.hour += missionSeconds / HOUR_SECONDS;
+    if (this.hour >= 24) {
+      this.hour %= 24;
+      this.sol += 1;
+      this.sunsetWarned = false;
+    }
     if (this.hour >= 17.5 && this.hour < 18.5 && !this.sunsetWarned) {
       this.sunsetWarned = true;
       this.hud.toast('Sunset is near: head back to base. Night falls to about -75 °C.');
@@ -888,7 +895,7 @@ export class Game {
       traveller: this.traveller, lat, lon,
       elevationM: this.site.elevationAt(x, z),
       slopeDeg: slope, rating, reason,
-      hour: this.hour,
+      hour: this.hour, sol: this.sol,
       airTempC: weather.airTempC, groundTempC: weather.groundTempC, pressurePa: weather.pressurePa,
       windMs: conditions.windMs, uvIndex: weather.uvIndex,
       doseRate: doseRate(this.analysis.skyView[cell]) * conditions.doseFactor * (this.camping ? CAMP_DOSE_FACTOR : 1),
@@ -1066,6 +1073,7 @@ export class Game {
       following: this.following,
       routes: this.routes.length,
       hour: this.hour,
+      sol: this.sol,
       weather: { storm: this.storm, fog: (this.scene.fog as THREE.FogExp2).density, dustDevils: this.weather.devilsActive },
       doseTotal: this.doseTotal,
       player: {
