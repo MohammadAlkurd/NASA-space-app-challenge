@@ -173,3 +173,6 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; heigh
   #toast { bottom: 300px; }
   #start.overlay { place-items: end center; }
 }
+
+#t-verdict b { font-size: 20px; }
+#t-verdict span { font-size: 13px; min-height: 0; }

@@ -29,6 +29,10 @@ export interface Telemetry {
   spaceStatus: string;
   spaceHeadline: string;
   spaceDetail: string;
+  scenario: string;
+  verdict: string;
+  verdictReason: string;
+  solarWm2: number;
   /** Guidance while following a route. */
   guidance: string;
 }
@@ -42,6 +46,7 @@ export interface HudActions {
   toggleCamera(): void;
   setTimeScale(scale: number): void;
   setHour(hour: number): void;
+  setScenario(scenario: 'clear' | 'dust' | 'solar'): void;
   setTool(tool: Tool): void;
   selectRoute(index: number): void;
   go(): void;
@@ -127,6 +132,12 @@ export class Hud {
           <div><dt>Dose this trip</dt><dd id="t-dose"></dd></div>
         </dl>
         <div id="t-space" class="space"><b></b><span></span></div>
+        <div id="t-verdict" class="status"><b></b><span></span></div>
+        <div class="segmented small" id="scenario" title="Clear sol is measured weather; the storms are drills">
+          <button data-scenario="clear" class="active">Clear sol</button>
+          <button data-scenario="dust">Dust storm</button>
+          <button data-scenario="solar">Solar storm</button>
+        </div>
         <div class="clock">
           <label for="hour">Local time <b id="t-hour"></b></label>
           <input id="hour" type="range" min="6" max="18" step="0.25" value="10" />
@@ -172,6 +183,10 @@ export class Hud {
     el(this.root, '#traveller').addEventListener('click', (event) => {
       const mode = (event.target as HTMLElement).dataset.mode as TravelMode | undefined;
       if (mode) actions.setTraveller(mode);
+    });
+    el(this.root, '#scenario').addEventListener('click', (event) => {
+      const scenario = (event.target as HTMLElement).dataset.scenario as 'clear' | 'dust' | 'solar' | undefined;
+      if (scenario) actions.setScenario(scenario);
     });
     el(this.root, '#speed').addEventListener('click', (event) => {
       const scale = Number((event.target as HTMLElement).dataset.scale);
@@ -222,6 +237,10 @@ export class Hud {
     this.renderPlanner();
   }
 
+  setScenario(scenario: string): void {
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-scenario]')) button.classList.toggle('active', button.dataset.scenario === scenario);
+  }
+
   setTimeScale(scale: number): void {
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-scale]')) button.classList.toggle('active', Number(button.dataset.scale) === scale);
   }
@@ -252,6 +271,10 @@ export class Hud {
     set('#t-ground', `${t.groundTempC.toFixed(0)} °C`);
     set('#t-pressure', `${t.pressurePa.toFixed(0)} Pa`);
     set('#t-wind', `${t.windMs.toFixed(1)} m/s`);
+    const verdict = el(this.root, '#t-verdict');
+    verdict.style.setProperty('--tone', t.verdict === 'GO' ? '#3ddc84' : t.verdict === 'NO-GO' ? '#ff3b3b' : '#ffd23f');
+    set('#t-verdict b', t.verdict);
+    set('#t-verdict span', `${t.verdictReason} Sunlight ${Math.round(t.solarWm2)} W/m².`);
     set('#t-uv', t.uvIndex.toFixed(0));
     set('#t-dose-rate', `${t.doseRate.toFixed(1)} µSv/h`);
     set('#t-dose', `${t.doseTotal.toFixed(1)} µSv`);

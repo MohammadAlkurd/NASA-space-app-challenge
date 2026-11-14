@@ -93,6 +93,10 @@ export class Game {
         this.sunsetWarned = false;
       },
       setTool: (tool) => this.setTool(tool),
+      setScenario: (scenario) => {
+        this.scenario = scenario;
+        this.hud.setScenario(scenario);
+      },
       selectRoute: (index) => this.selectRoute(index),
       go: () => this.go(),
       stop: () => this.stopFollowing(),
@@ -546,14 +550,16 @@ export class Game {
     const rover = this.traveller === 'rover';
     const reserve = rover ? 1 - this.energyWh / ROVER_BATTERY_WH : 1 - this.suitSeconds / SUIT_BUDGET_S;
     const space = this.environment.spaceWeather;
+    const conditions = this.conditions ?? assess(this.scenario, weather, space);
     this.hud.setTelemetry({
+      scenario: this.scenario, verdict: conditions.verdict, verdictReason: conditions.reasons[0] ?? 'Conditions are good for a walk.', solarWm2: conditions.solarWm2,
       traveller: this.traveller, lat, lon,
       elevationM: this.site.elevationAt(x, z),
       slopeDeg: slope, rating, reason,
       hour: this.hour,
       airTempC: weather.airTempC, groundTempC: weather.groundTempC, pressurePa: weather.pressurePa,
-      windMs: weather.windMs, uvIndex: weather.uvIndex,
-      doseRate: doseRate(this.analysis.skyView[cell]),
+      windMs: conditions.windMs, uvIndex: weather.uvIndex,
+      doseRate: doseRate(this.analysis.skyView[cell]) * conditions.doseFactor,
       doseTotal: this.doseTotal,
       reserve,
       reserveText: rover
