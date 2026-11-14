@@ -1,3 +1,4 @@
+import { HOUR_SECONDS } from '../data/Environment';
 import { MODEL, SUIT_ENERGY_J, suitSupplies } from './Models';
 import type { Checkpoint, Route } from './Router';
 import { clock } from './Timeline';
@@ -27,7 +28,7 @@ export function checklistRows(route: Route, startHour: number, doseFactor = 1): 
   return route.stats.trip.checkpoints.map((c) => ({
     kind: c.kind,
     name: c.name,
-    clock: clock(startHour + c.atS / 3600),
+    clock: clock(startHour + c.atS / HOUR_SECONDS),
     elapsedMin: Math.round(c.atS / 60),
     distanceM: finite(c.distanceM),
     slopeDeg: c.kind === 'start' || c.kind === 'leave' ? null : finite(c.slopeDeg),

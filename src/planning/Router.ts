@@ -1,3 +1,4 @@
+import { HOUR_SECONDS } from '../data/Environment';
 import type { TravelProfile } from '../entities/Explorer';
 import { Analysis, GRID, doseRate } from './Analysis';
 import { abortRules, checklistRows, type ChecklistRow } from './Checklist';
@@ -637,7 +638,7 @@ export function toCSV(route: Route, toLatLon: LatLon, elevation: Elevation, star
     const on = named.get(p);
     out.push([
       k, lat.toFixed(6), lon.toFixed(6), elevation(p.x, p.z).toFixed(1), route.ratings[k], on?.name ?? '',
-      clock(startHour + track.atS[k] / 3600), Math.round(track.distM[k]), share(track.left[k]),
+      clock(startHour + track.atS[k] / HOUR_SECONDS), Math.round(track.distM[k]), share(track.left[k]),
       rover ? '' : share(suit.oxygen), rover ? '' : share(suit.water), (track.doseUSv[k] * doseFactor).toFixed(1),
       on?.shelterMin ?? '', on?.goOnPct ?? '',
     ].join(','));
