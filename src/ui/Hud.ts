@@ -3,7 +3,7 @@ import type { TravelMode } from '../entities/Explorer';
 import type { LayerId } from '../planning/Analysis';
 import type { BaseScore } from '../planning/BaseSite';
 import { abortRules, checklistRows } from '../planning/Checklist';
-import { ROVER_BATTERY_WH, formatDuration, type Rating, type Route, type RoutePoint } from '../planning/Router';
+import { formatDuration, type Rating, type Route, type RoutePoint } from '../planning/Router';
 import { SITES, type GlobeSite } from '../world/Globe';
 import type { Stop } from '../world/Markers';
 import { ABOUT_HTML } from './about';
@@ -635,8 +635,9 @@ export class Hud {
       // Only the travel stretches with the weather; the time at the stop does not.
       const travelS = trip.totalS - trip.stopS;
       const durationS = travelS > 0 ? (r.stats.durationS * (totalS - trip.stopS)) / travelS : r.stats.durationS;
-      const share = rover ? trip.resource / ROVER_BATTERY_WH : trip.resource;
-      const left = Number.isFinite(share) ? `${Math.round(Math.max(0, 1 - share) * 100)} %` : '—';
+      // What is left at the end of the outing, from the reserve the crew has now.
+      const end = trip.checkpoints[trip.checkpoints.length - 1]?.energy;
+      const left = end === undefined || !Number.isFinite(end) ? '—' : `${Math.round(Math.max(0, end) * 100)} %`;
       return `<button class="route ${index === this.selected ? 'active' : ''}" data-route="${index}">
         <b>${r.label}</b>
         <span class="chip" style="--tone:${TONE[r.stats.worst]}">${r.stats.worst}</span>
