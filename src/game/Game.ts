@@ -757,10 +757,16 @@ export class Game {
       if (this.transfer) this.stepTransfer(real);
       else if (this.camping) {
         if (manual) this.hud.toast('You are camped in the rover. Press "Break camp" to drive.');
-      } else if (this.following) this.followStep(dt);
-      else explorer.update({ throttle: this.input.throttle, steer: this.input.steer }, dt, this.timeScale * (this.conditions?.speedFactor ?? 1));
+      } else if (this.following) this.followStep(real);
+      else {
+        // Small steps keep the slope check honest on a slow frame; the total still matches the clock.
+        for (let left = real; left > 1e-4; left -= 0.05) {
+          explorer.update({ throttle: this.input.throttle, steer: this.input.steer }, Math.min(left, 0.05), this.timeScale * (this.conditions?.speedFactor ?? 1));
+        }
+      }
       if (explorer.blocked && manual) this.hud.toast(`Too steep ahead: over the ${explorer.profile.maxSlope}° limit. Back up and go around.`);
-      this.account(dt);
+      // Wall-clock time, so the Mars clock keeps its rate when the frame rate drops.
+      this.account(real);
     }
 
     const weather = this.environment.at(this.hour);

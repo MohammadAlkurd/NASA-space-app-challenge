@@ -48,6 +48,11 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await expect(page.locator('#t-air')).toContainText('°C');
   await expect(page.locator('#t-dose-rate')).toContainText('µSv/h');
 
+  // The Mars clock runs on its own, with no input.
+  await expect(page.locator('#t-clock')).toContainText('Sol 1');
+  const startHour = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.hour as number);
+  await page.waitForFunction((hour) => (window.__THREE_GAME_DIAGNOSTICS__!.hour as number) > hour + 2 / 3600, startHour, { timeout: 30_000 });
+
   // Challenge core: a route to a science objective that avoids no-go terrain, with alternatives.
   const routes = await page.evaluate(() => (window.__MARS__ as Mars).planToStop('rochette'));
   expect(routes.length).toBeGreaterThanOrEqual(2);
@@ -55,6 +60,12 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   expect(routes[0].noGoM).toBe(0);
   expect(routes[0].distanceM).toBeGreaterThan(500);
   await expect(page.locator('#planner .route')).toHaveCount(routes.length);
+
+  // Boarding the rover keeps the planned trip and re-plans it for the rover.
+  await page.evaluate(() => (window.__MARS__ as Mars).setTraveller('rover'));
+  await page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__!.traveller === 'rover', null, { timeout: 60_000 });
+  expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.routes as number)).toBeGreaterThanOrEqual(1);
+  await expect(page.locator('#planner .route').first()).toBeVisible();
 
   // Each layer can be switched on.
   for (const layer of ['hazard', 'elevation', 'radiation', 'thermal', 'optical']) {
@@ -77,8 +88,7 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   expect(await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.doseTotal as number)).toBeGreaterThan(0);
   await expect(page.locator('#guidance')).toContainText('to go');
 
-  // A science stop shows a real rover photo with credit.
-  await page.evaluate(() => (window.__MARS__ as Mars).setTraveller('rover'));
+  // The Sources panel maps the build to the challenge.
   await page.click('#about-button');
   await expect(page.locator('#about')).toContainText('Martian Map');
   await page.click('#about-close');
