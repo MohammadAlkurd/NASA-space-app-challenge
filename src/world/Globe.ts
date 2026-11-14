@@ -154,10 +154,14 @@ export class Globe {
     this.latitude = THREE.MathUtils.clamp(this.latitude + dy * 0.2, -70, 70);
   }
 
-  resize(aspect: number): void {
+  resize(width: number, height: number): void {
+    const aspect = width / height;
     this.camera.aspect = aspect;
     // Keep the whole planet in view on tall screens.
     this.distance = aspect < 1 ? 3.3 / Math.max(aspect, 0.45) : 3.3;
+    // On wide screens push the planet to the right, clear of the title.
+    if (aspect > 1.2) this.camera.setViewOffset(width, height, -width * 0.2, 0, width, height);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
   }
 

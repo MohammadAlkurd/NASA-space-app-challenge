@@ -263,7 +263,7 @@ export class Game {
 
   private frameAround(point: RoutePoint, radius: number): void {
     const wide = window.innerWidth > 860;
-    this.rig.frame(point.x - radius, point.x + radius, point.z - radius, point.z + radius, wide ? 300 : 0, wide ? 250 : 420);
+    this.rig.frame(point.x - radius, point.x + radius, point.z - radius, point.z + radius, wide ? 290 : 0, wide ? 280 : 420);
   }
 
   private frameRoutes(): void {
@@ -280,7 +280,7 @@ export class Game {
       }
     }
     const wide = window.innerWidth > 860;
-    this.rig.frame(minX, maxX, minZ, maxZ, wide ? 300 : 0, wide ? 250 : 420);
+    this.rig.frame(minX, maxX, minZ, maxZ, wide ? 290 : 0, wide ? 280 : 420);
   }
 
   private selectRoute(index: number): void {
@@ -639,7 +639,7 @@ export class Game {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.globe?.resize(width / height);
+    this.globe?.resize(width, height);
     this.markers?.resize(width, height);
   };
 

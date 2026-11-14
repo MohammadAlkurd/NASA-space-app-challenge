@@ -103,7 +103,7 @@ export class Hud {
 
       <aside id="telemetry" class="panel" hidden>
         <header>
-          <strong>Jezero Crater, Mars</strong>
+          <strong>Jezero Crater · Mars</strong>
           <span id="t-position" class="muted"></span>
         </header>
         <div class="segmented" id="traveller">
