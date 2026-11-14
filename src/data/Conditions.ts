@@ -1,7 +1,7 @@
 import { MODEL } from '../planning/Models';
 import type { SpaceWeather, Weather } from './Environment';
 
-/** 'clear' is the measured MEDA sol. 'dust' and 'solar' are modelled drills, labelled as such in the UI. */
+/** 'clear' is the measured weather-station sol. 'dust' and 'solar' are modelled drills, labelled as such in the UI. */
 export type Scenario = 'clear' | 'dust' | 'solar';
 export type Verdict = 'GO' | 'GO WITH CARE' | 'NO-GO';
 

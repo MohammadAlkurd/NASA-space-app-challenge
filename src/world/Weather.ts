@@ -165,7 +165,7 @@ export class Weather {
    */
   update(dt: number, camera: THREE.PerspectiveCamera, traveller: THREE.Vector3, windMs: number, storm: number, daylight: number, viewportHeight: number, mapHeight: number): void {
     this.time += dt;
-    // The MEDA table has no wind direction, so the wind blows from the west and veers slowly.
+    // The weather table has no wind direction, so the wind blows from the west and veers slowly.
     const bearing = 1.45 + 0.35 * Math.sin(this.time * 0.04);
     const windX = Math.sin(bearing);
     const windZ = -Math.cos(bearing) * 0.4;

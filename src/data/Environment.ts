@@ -3,6 +3,8 @@ import * as THREE from 'three';
 export interface EnvironmentTable {
   source: string;
   sol: number;
+  /** Latitude the sun stands over on that sol, degrees. */
+  subsolarLatDeg?: number;
   airTempC: number[];
   groundTempC: number[];
   pressurePa: number[];
@@ -40,7 +42,7 @@ function lerpHour(values: number[], hour: number): number {
   return values[i] + (values[(i + 1) % 24] - values[i]) * (h - i);
 }
 
-/** MEDA weather by local hour, sun position, and NASA DONKI space-weather alerts. */
+/** Weather-station table (MEDA or REMS) by local hour, sun position, and NASA DONKI space-weather alerts. */
 export class Environment {
   spaceWeather: SpaceWeather = { status: 'loading', headline: 'Checking NASA DONKI...', detail: '' };
 
@@ -54,8 +56,8 @@ export class Environment {
 
   /** Conditions at a local mean solar hour (0..24). */
   at(hour: number): Weather {
-    // Sub-solar latitude for the MEDA sol (northern summer, Ls ~ 97 deg): close to the 25.2 deg axial tilt.
-    const declination = 25.0 * DEG;
+    // Sub-solar latitude on the measured sol. Jezero's MEDA sol is northern summer, Gale's REMS sol southern summer.
+    const declination = (this.table.subsolarLatDeg ?? 25.0) * DEG;
     const lat = this.latitudeDeg * DEG;
     const hourAngle = (hour - 12) * 15 * DEG;
     const sinElevation = Math.sin(lat) * Math.sin(declination) + Math.cos(lat) * Math.cos(declination) * Math.cos(hourAngle);

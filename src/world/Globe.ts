@@ -12,14 +12,16 @@ export interface GlobeSite {
   note: string;
   /** True when this build has walkable terrain for the site. */
   primary?: boolean;
+  /** Folder under data/ holding that terrain. */
+  id?: string;
   /** A real surface photo taken there: file under data/globe/sites, credit, NASA image id. */
   photo: { file: string; credit: string; id: string };
 }
 
-/** Where NASA has landed on Mars. Only Jezero has walkable terrain in this build. */
+/** Where NASA has landed on Mars. Sites with an id have walkable 1 m terrain in this build. */
 export const SITES: GlobeSite[] = [
-  { name: 'Jezero Crater · Perseverance', lat: 18.44, lon: 77.45, primary: true, mission: 'Rover, landed 2021', note: 'An ancient river delta and lake bed. Perseverance collects rock samples here to look for signs of past life.', photo: { file: 'jezero.jpg', credit: 'NASA/JPL-Caltech', id: 'Perseverance Navcam, sol 13' } },
-  { name: 'Gale Crater · Curiosity', lat: -4.59, lon: 137.44, mission: 'Rover, landed 2012', note: 'A lake bed at the foot of Mount Sharp. Curiosity made the first radiation measurements on the surface of Mars here.', photo: { file: 'gale.jpg', credit: 'NASA/JPL-Caltech/MSSS', id: 'PIA16101' } },
+  { name: 'Jezero Crater · Perseverance', lat: 18.44, lon: 77.45, primary: true, id: 'jezero', mission: 'Rover, landed 2021', note: 'An ancient river delta and lake bed. Perseverance collects rock samples here to look for signs of past life.', photo: { file: 'jezero.jpg', credit: 'NASA/JPL-Caltech', id: 'Perseverance Navcam, sol 13' } },
+  { name: 'Gale Crater · Curiosity', lat: -4.59, lon: 137.44, primary: true, id: 'gale', mission: 'Rover, landed 2012', note: 'A lake bed at the foot of Mount Sharp. Curiosity made the first radiation measurements on the surface of Mars here.', photo: { file: 'gale.jpg', credit: 'NASA/JPL-Caltech/MSSS', id: 'PIA16101' } },
   { name: 'Elysium Planitia · InSight', lat: 4.5, lon: 135.62, mission: 'Lander, 2018 to 2022', note: 'A flat lava plain. InSight recorded marsquakes and daily weather here.', photo: { file: 'insight.jpg', credit: 'NASA/JPL-Caltech', id: 'PIA22575' } },
   { name: 'Gusev Crater · Spirit', lat: -14.57, lon: 175.47, mission: 'Rover, 2004 to 2010', note: 'Spirit found silica left by hot springs in the Columbia Hills.', photo: { file: 'gusev.jpg', credit: 'NASA/JPL-Caltech/Cornell Univ.', id: 'PIA17760' } },
   { name: 'Meridiani Planum · Opportunity', lat: -1.95, lon: -5.53, mission: 'Rover, 2004 to 2018', note: 'Opportunity drove 45 km here and found minerals that form in water. A global dust storm ended the mission.', photo: { file: 'meridiani.jpg', credit: 'NASA/JPL-Caltech/Cornell Univ./Arizona State Univ.', id: 'PIA19109' } },
@@ -66,7 +68,7 @@ function label(text: string): { sprite: THREE.Sprite; plain: THREE.CanvasTexture
   return { sprite, plain, marked };
 }
 
-/** Mars from orbit with NASA's landing sites. Opens the app, and is where zooming out of the map leads; ends with a dive to Jezero. */
+/** Mars from orbit with NASA's landing sites. Opens the app, and is where zooming out of the map leads; ends with a dive to the loaded site. */
 export class Globe {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
@@ -76,14 +78,14 @@ export class Globe {
   private rise = -1;
   private zoomFactor = 1;
   private spinning = true;
-  private selected: GlobeSite = SITES[0];
+  private selected: GlobeSite;
   private width = 1;
   private height = 1;
   private readonly pulse: THREE.Mesh;
-  private readonly target = direction(SITES[0].lat, SITES[0].lon);
+  private readonly target = new THREE.Vector3();
   private readonly view = new THREE.Vector3();
   private readonly disposables: { dispose(): void }[] = [];
-  private longitude = SITES[0].lon - 38;
+  private longitude = 0;
   private latitude = 14;
   private zoomPast = 1;
   private distance = 3.3;
@@ -93,12 +95,17 @@ export class Globe {
   private time = 0;
   private last = performance.now();
 
-  constructor(baseUrl: string, private readonly fromSurface = false) {
+  /** `home` is the site whose terrain is loaded: the globe opens on it and dives to it. */
+  constructor(baseUrl: string, private readonly fromSurface = false, private readonly home: GlobeSite = SITES[0]) {
+    this.selected = home;
+    direction(home.lat, home.lon, this.target);
+    this.longitude = home.lon - 38;
+    this.latitude = home.lat * 0.75;
     if (fromSurface) {
       this.rise = 0;
       this.spinning = false;
-      this.longitude = SITES[0].lon;
-      this.latitude = SITES[0].lat;
+      this.longitude = this.home.lon;
+      this.latitude = this.home.lat;
     }
     this.scene.background = new THREE.Color('#05030a');
     const loader = new THREE.TextureLoader();
@@ -139,7 +146,7 @@ export class Globe {
     const starMaterial = new THREE.PointsMaterial({ color: '#d9d2ff', size: 1.6, sizeAttenuation: false });
     this.scene.add(new THREE.Points(starGeometry, starMaterial));
 
-    this.sun.position.copy(direction(12, SITES[0].lon - 55)).multiplyScalar(10);
+    this.sun.position.copy(direction(12, this.home.lon - 55)).multiplyScalar(10);
     this.scene.add(this.sun, new THREE.AmbientLight('#6b5a66', 0.5));
 
     const dotGeometry = new THREE.SphereGeometry(1, 12, 8);
@@ -169,7 +176,7 @@ export class Globe {
     return this.dive >= 0;
   }
 
-  /** 0..1 while flying down to Jezero; 1 means the surface should take over. */
+  /** 0..1 while flying down to the loaded site; 1 means the surface should take over. */
   get progress(): number {
     return this.dive < 0 ? 0 : Math.min(1, this.dive / 2.6);
   }
@@ -178,7 +185,7 @@ export class Globe {
     if (this.dive >= 0) return;
     this.dive = 0;
     this.rise = -1;
-    this.select(SITES[0]);
+    this.select(this.home);
   }
 
   /** 0..1 while lifting off the surface into orbit. */
@@ -289,10 +296,10 @@ export class Globe {
       this.dive += dt;
       const t = this.progress;
       const ease = t * t * (3 - 2 * t);
-      // Swing over Jezero, then fall toward it.
-      const turn = ((SITES[0].lon - this.longitude + 540) % 360) - 180;
+      // Swing over the site, then fall toward it.
+      const turn = ((this.home.lon - this.longitude + 540) % 360) - 180;
       this.longitude += turn * Math.min(1, 4 * dt + ease);
-      this.latitude += (SITES[0].lat - this.latitude) * Math.min(1, 4 * dt + ease);
+      this.latitude += (this.home.lat - this.latitude) * Math.min(1, 4 * dt + ease);
       distance += (1.012 - distance) * Math.pow(ease, 1.6);
     } else if (this.spinning) {
       this.longitude += dt * 1.6;

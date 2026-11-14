@@ -116,10 +116,10 @@ function nameTag(text: string): THREE.Sprite {
   return tag;
 }
 
-/** Lines and markers drawn over the terrain: planned routes, science stops, Perseverance's real path. */
+/** Lines and markers drawn over the terrain: planned routes, science stops, the mission rover's real path. */
 export class Markers {
   readonly group = new THREE.Group();
-  /** Switches for Perseverance's path and the walk-back limit lines. */
+  /** Switches for the mission rover's path and the walk-back limit lines. */
   showTraverse = true;
   showLimits = true;
   private readonly traverse = new THREE.Group();

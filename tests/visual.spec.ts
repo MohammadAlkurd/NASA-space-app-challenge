@@ -166,3 +166,35 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await page.screenshot({ path: testInfo.outputPath('play.png') });
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('lands at Gale from the globe and plans a walk to a Curiosity stop', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.route('https://api.nasa.gov/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
+
+  await page.goto('./');
+  await expect(page.locator('#start-button')).toBeEnabled({ timeout: 120_000 });
+  await page.click('#start-button');
+  await page.click('#sites [data-site^="Gale"]');
+  await page.click('#sites [data-land]');
+  // Another site's terrain loads with a fresh page, which then lands by itself.
+  await page.waitForURL(/site=gale/);
+  await page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__?.started === true, null, { timeout: 180_000 });
+  await expect(page.locator('#ui')).toHaveAttribute('data-mode', 'plan');
+  expect(await canvasIsNonBlank(page)).toMatchObject({ ok: true });
+
+  const routes = await page.evaluate(() => (window.__MARS__ as Mars).planToStop('johnklein'));
+  expect(routes.length).toBeGreaterThan(0);
+  expect(routes[0].noGoM).toBe(0);
+  expect(routes[0].distanceM).toBeGreaterThan(300);
+  expect(routes[0].distanceM).toBeLessThan(900);
+  // Sol 196 was measured by Curiosity's REMS: about -33 °C in the air at 10:00.
+  await page.click('#mode [data-mode="explore"]');
+  await page.click('#stats-button');
+  await expect(page.locator('#t-air')).toContainText(/-3\d °C/);
+  expect(errors).toEqual([]);
+});

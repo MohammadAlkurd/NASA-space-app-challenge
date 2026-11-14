@@ -1,0 +1,26 @@
+{
+ "id": "gale",
+ "name": "Gale Crater - Curiosity landing area",
+ "crs": "Mars 2000 sphere (R = 3396190 m), planetocentric latitude, east-positive longitude; elevation in metres relative to the MOLA areoid",
+ "marsRadius": 3396190.0,
+ "centerLat": -4.613924852041073,
+ "centerLon": 137.4255515483167,
+ "cosLat": 0.9967593579119247,
+ "local": {
+  "sizeM": 5120.0,
+  "px": 2048,
+  "cellM": 2.5,
+  "minElev": -4530.0,
+  "maxElev": -4370.0
+ },
+ "regional": {
+  "sizeM": 20480.0,
+  "px": 1024,
+  "cellM": 20.0,
+  "minElev": -4555.0,
+  "maxElev": -1725.0
+ },
+ "credits": [
+  "MSL Gale merged HiRISE DEM mosaic (1 m) and orthophoto mosaic (25 cm): USGS Astrogeology Science Center / NASA / JPL-Caltech / University of Arizona (Calef and Parker, 2016)"
+ ]
+}

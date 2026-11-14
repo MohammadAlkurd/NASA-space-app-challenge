@@ -336,6 +336,11 @@ export class Hud {
     el(this.root, '#sites').innerHTML = '';
   }
 
+  /** Hide the title screen without a click. */
+  skipStart(): void {
+    el(this.root, '#start').hidden = true;
+  }
+
   setReady(): void {
     const button = el<HTMLButtonElement>(this.root, '#start-button');
     button.disabled = false;
@@ -551,7 +556,7 @@ export class Hud {
     this.renderPlanner();
   }
 
-  /** A science stop, shown as the photo Perseverance took there. */
+  /** A science stop, shown as the photo the rover took there. */
   showStop(stop: Stop): void {
     const card = el(this.root, '#card');
     const photo = stop.photo;

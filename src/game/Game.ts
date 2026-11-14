@@ -112,6 +112,9 @@ export class Game {
   private energyWh = 0;
   /** The landing-site picker is open before the first landing. */
   private picking = false;
+  private readonly autoLand = new URLSearchParams(window.location.search).get('land') === '1';
+  /** The landing site whose terrain this page loaded: ?site=gale, Jezero by default. */
+  private readonly homeSite = SITES.find((s) => s.id && s.id === new URLSearchParams(window.location.search).get('site')) ?? SITES[0];
   /** Cabin air used, in person-seconds. Camping and suit refills draw on it; the lander refills it. */
   private cabinSeconds = 0;
   private cabinWarned = false;
@@ -185,8 +188,16 @@ export class Game {
       interact: () => this.interact(),
       camp: () => this.toggleCamp(),
       pickSite: (name) => this.selectSite(name),
-    }, `${import.meta.env.BASE_URL}data/jezero/`, `${import.meta.env.BASE_URL}data/globe/sites/`);
-    this.globe = new Globe(`${import.meta.env.BASE_URL}data/globe/`);
+    }, `${import.meta.env.BASE_URL}data/${this.homeSite.id}/`, `${import.meta.env.BASE_URL}data/globe/sites/`);
+    this.globe = new Globe(`${import.meta.env.BASE_URL}data/globe/`, false, this.homeSite);
+    // Arriving from "Land here" on another site: skip the title and the picker, and dive once the terrain is in.
+    if (this.autoLand) {
+      window.history.replaceState(null, '', `?site=${this.homeSite.id}`);
+      this.picking = true;
+      this.hud.skipStart();
+      this.hud.showPanels();
+      this.hud.toast(`Loading ${this.homeSite.name.split(' · ')[0]}...`);
+    }
     window.addEventListener('resize', this.onResize);
     this.bindPointer();
     this.onResize();
@@ -195,7 +206,7 @@ export class Game {
 
   async start(): Promise<void> {
     this.hud.setLoadStatus('Loading terrain from NASA HiRISE...');
-    this.site = await loadSite('jezero');
+    this.site = await loadSite(this.homeSite.id!);
     this.scene.fog = new THREE.FogExp2(DUST_COLOR, 0.00011);
     this.sky = new Sky(30000);
     this.scene.add(this.sky.group);
@@ -226,7 +237,7 @@ export class Game {
     this.scene.add(this.terrain.group, this.rocks.mesh, this.weather.group, this.rover.group, this.astronaut.group, this.lander.group, this.markers.group);
     this.rig = new CameraRig(this.camera, this.site);
 
-    // Start where Perseverance landed, the rover parked and the astronaut beside it.
+    // Start where the site's NASA rover landed, the rover parked and the astronaut beside it.
     const landing = mission.stops[0];
     this.rover.place(landing.x + ROVER_OFFSET.x, landing.z + ROVER_OFFSET.z, -Math.PI / 2);
     this.base = { x: landing.x, z: landing.z };
@@ -247,6 +258,7 @@ export class Game {
     this.onResize();
     this.ready = true;
     this.exposeDebug();
+    if (this.autoLand) this.globe?.startDive();
   }
 
   dispose(): void {
@@ -267,7 +279,7 @@ export class Game {
     return this.traveller === 'rover' ? this.rover : this.astronaut;
   }
 
-  /** Start pressed: dive from orbit to Jezero, then hand over to the surface. */
+  /** Start pressed: dive from orbit to the landing site, then hand over to the surface. */
   private begin(): void {
     if (!this.globe) return this.land();
     // First the landing site is picked on the globe; "Land here" comes back through this.
@@ -277,7 +289,13 @@ export class Game {
       this.hud.showGlobe(this.globe.site);
       return;
     }
-    if (!this.globe.site.primary) return;
+    const chosen = this.globe.site;
+    if (!chosen.id) return;
+    // Each site's terrain is loaded with the page, so another site means a fresh landing there.
+    if (chosen !== this.homeSite) {
+      window.location.search = `?site=${chosen.id}&land=1`;
+      return;
+    }
     this.globe.startDive();
     this.hud.hideGlobe();
   }
@@ -286,7 +304,7 @@ export class Game {
   private openGlobe(): void {
     if (this.globe || !this.started) return;
     this.zoomPast = 1;
-    this.globe = new Globe(`${import.meta.env.BASE_URL}data/globe/`, true);
+    this.globe = new Globe(`${import.meta.env.BASE_URL}data/globe/`, true, this.homeSite);
     this.onResize();
     this.hud.showGlobe(this.globe.site);
   }
@@ -717,7 +735,7 @@ export class Game {
     const blob = new Blob([text], { type: format === 'geojson' ? 'application/geo+json' : 'text/csv' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `jezero-${route.kind}-route.${format}`;
+    link.download = `${this.homeSite.id}-${route.kind}-route.${format}`;
     link.click();
     URL.revokeObjectURL(link.href);
   }
