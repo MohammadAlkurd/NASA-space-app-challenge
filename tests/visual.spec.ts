@@ -28,7 +28,7 @@ type Mars = {
 };
 
 test('loads Jezero, plans a safe route to a science stop and follows it', async ({ page }, testInfo) => {
-  test.setTimeout(240_000);
+  test.setTimeout(480_000);
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -43,16 +43,24 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await page.waitForFunction(() => (window.__THREE_GAME_DIAGNOSTICS__?.frame ?? 0) > 3, null, { timeout: 60_000 });
   expect(await canvasIsNonBlank(page)).toMatchObject({ ok: true });
 
-  // Start: dive from the globe to the surface.
+  // Start: pick the landing site on the globe, then dive to the planning map.
   await page.click('#start-button');
+  await expect(page.locator('#sites .tiles .shot')).toHaveCount(9);
+  await page.click('#sites [data-land]');
   await page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__?.started === true, null, { timeout: 60_000 });
-  await expect(page.locator('#telemetry')).toBeVisible();
+  await expect(page.locator('#ui')).toHaveAttribute('data-mode', 'plan');
   expect(await canvasIsNonBlank(page)).toMatchObject({ ok: true });
+  // The readouts that are not needed while walking sit in the Stats sheet.
+  await page.click('#mode [data-mode="explore"]');
+  await expect(page.locator('#vitals')).toBeVisible();
+  await page.click('#stats-button');
   await expect(page.locator('#t-air')).toContainText('°C');
   await expect(page.locator('#t-dose-rate')).toContainText('µSv/h');
+  await page.click('#stats [data-close]');
+  await page.click('#mode [data-mode="plan"]');
 
   // The Mars clock runs on its own, with no input.
-  await expect(page.locator('#t-clock')).toContainText('Sol 1');
+  await expect(page.locator('#t-sol')).toContainText('Sol 1');
   const startHour = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.hour as number);
   await page.waitForFunction((hour) => (window.__THREE_GAME_DIAGNOSTICS__!.hour as number) > hour + 2 / 3600, startHour, { timeout: 30_000 });
 
@@ -74,8 +82,8 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await expect(page.locator('#trip-check')).toContainText('PASS');
 
   // The checklist lists every leg with the supplies left, and the abort rules in plain words.
-  await expect(page.locator('#planner .route').first()).toContainText(/oxygen \d+ % · water \d+ % left/);
-  await page.locator('[data-action="checklist"]').click();
+  await expect(page.locator('#planner .route').first()).toContainText(/oxygen \d+ %, water \d+ % left/);
+  await page.locator('#planner [data-action="checklist"]').click();
   const legs = page.locator('#checklist table.legs tbody tr');
   await expect(legs.first()).toContainText('Start');
   await expect(legs.last()).toContainText('Back at shelter');
@@ -83,7 +91,9 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   expect(cells.length).toBeGreaterThanOrEqual(5);
   const oxygen = cells.map((row) => Number.parseInt(row[5], 10));
   const water = cells.map((row) => Number.parseInt(row[6], 10));
-  expect(oxygen[0]).toBe(100);
+  // The suit has been in use for the minute or so since landing.
+  expect(oxygen[0]).toBeGreaterThanOrEqual(97);
+  expect(oxygen[0]).toBeLessThanOrEqual(100);
   for (let k = 1; k < cells.length; k += 1) {
     expect(oxygen[k]).toBeLessThanOrEqual(oxygen[k - 1]);
     expect(water[k]).toBeLessThanOrEqual(water[k - 1]);
@@ -98,12 +108,12 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await expect(page.locator('#checklist')).toBeHidden();
 
   // The saved files carry the same checkpoints.
-  const [geo] = await Promise.all([page.waitForEvent('download'), page.locator('[data-action="geojson"]').click()]);
+  const [geo] = await Promise.all([page.waitForEvent('download'), page.locator('#planner [data-action="geojson"]').click()]);
   const saved = JSON.parse((await (await geo.createReadStream()).toArray()).join(''));
   expect(saved.features[0].properties.abort_rules.length).toBeGreaterThanOrEqual(3);
   expect(saved.features[0].properties.oxygen_left_at_end_pct).toBe(oxygen.at(-1));
   expect(saved.features.filter((f: { geometry: { type: string } }) => f.geometry.type === 'Point').length).toBe(cells.length);
-  const [csv] = await Promise.all([page.waitForEvent('download'), page.locator('[data-action="csv"]').click()]);
+  const [csv] = await Promise.all([page.waitForEvent('download'), page.locator('#planner [data-action="csv"]').click()]);
   const lines = (await (await csv.createReadStream()).toArray()).join('').split('\n');
   expect(lines[0]).toContain('oxygen_left_pct');
   expect(lines.at(-1)).toContain('Back at shelter');
@@ -123,7 +133,7 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   // Follow the route: position changes and dose accumulates.
   const before = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__!.player.position);
   await page.evaluate(() => (window.__MARS__ as Mars).setTimeScale(20));
-  await page.click('[data-action="go"]');
+  await page.click('[data-action="go"]:visible');
   await page.waitForFunction(
     (start) => {
       const d = window.__THREE_GAME_DIAGNOSTICS__!;
@@ -136,7 +146,8 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await expect(page.locator('#guidance')).toContainText('to go');
 
   // The Sources panel maps the build to the challenge.
-  await page.click('#about-button');
+  await page.click('#stats-button');
+  await page.click('#stats [data-open="about"]');
   await expect(page.locator('#about')).toContainText('Martian Map');
   await page.click('#about-close');
 

@@ -28,57 +28,123 @@ export interface Stop {
   photo?: { file: string; title: string; caption: string; credit: string; link: string; sol: number } | null;
 }
 
+/** Height of lines above the ground, metres: enough to clear small bumps without floating. */
+const LIFT = 0.6;
+
 export interface Mission {
   traverse: { paths: number[][][]; lengthM: number; lastSol: number; credit: string };
   stops: Stop[];
 }
 
-function labelSprite(text: string, color: string): THREE.Sprite {
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d')!;
-  const font = '600 44px system-ui, sans-serif';
-  context.font = font;
-  canvas.width = Math.ceil(context.measureText(text).width) + 56;
-  canvas.height = 76;
-  context.font = font;
-  context.fillStyle = 'rgba(20, 12, 8, 0.82)';
-  context.beginPath();
-  context.roundRect(0, 0, canvas.width, canvas.height, 18);
-  context.fill();
-  context.strokeStyle = color;
-  context.lineWidth = 4;
-  context.stroke();
-  context.fillStyle = '#fff6ea';
-  context.textBaseline = 'middle';
-  context.fillText(text, 28, 40);
+type Shape = 'diamond' | 'square' | 'ring' | 'triangle' | 'dot';
+
+/** Sprite heights as a share of the view height: markers keep one small size on screen at any distance. */
+const GLYPH_SIZE = 0.017;
+const LABEL_SIZE = 0.019;
+/** On the ground, names show only for markers this close, metres. */
+const LABEL_RANGE = 500;
+/** Lines follow the ground at this spacing so hills hide them correctly, metres. */
+const LINE_STEP = 3;
+
+function sprite(canvas: HTMLCanvasElement, height: number): THREE.Sprite {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, sizeAttenuation: false, fog: false }));
-  sprite.scale.set((canvas.width / canvas.height) * 0.03, 0.03, 1);
-  sprite.renderOrder = 20;
-  return sprite;
+  const mark = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, sizeAttenuation: false, fog: false, transparent: true }));
+  mark.scale.set((canvas.width / canvas.height) * height, height, 1);
+  mark.renderOrder = 20;
+  return mark;
 }
 
-/** Lines and beacons drawn over the terrain: planned routes, science stops, Perseverance's real path. */
+/** A small flat symbol, the same size on screen at any distance. */
+function glyph(shape: Shape, color: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const context = canvas.getContext('2d')!;
+  context.translate(32, 32);
+  context.lineJoin = 'miter';
+  context.beginPath();
+  if (shape === 'diamond') {
+    context.moveTo(0, -22);
+    context.lineTo(22, 0);
+    context.lineTo(0, 22);
+    context.lineTo(-22, 0);
+    context.closePath();
+  } else if (shape === 'square') context.rect(-17, -17, 34, 34);
+  else if (shape === 'triangle') {
+    context.moveTo(0, -22);
+    context.lineTo(22, 18);
+    context.lineTo(-22, 18);
+    context.closePath();
+  } else context.arc(0, 0, shape === 'dot' ? 11 : 19, 0, Math.PI * 2);
+  // A dark edge keeps the symbol readable on bright ground.
+  context.strokeStyle = 'rgba(12, 10, 9, 0.9)';
+  context.lineWidth = 14;
+  context.stroke();
+  if (shape === 'ring' || shape === 'diamond') {
+    context.fillStyle = 'rgba(12, 10, 9, 0.55)';
+    context.fill();
+    context.strokeStyle = color;
+    context.lineWidth = 7;
+    context.stroke();
+  } else {
+    context.fillStyle = color;
+    context.fill();
+  }
+  return sprite(canvas, GLYPH_SIZE);
+}
+
+/** A plain name beside a glyph: no box, just outlined text. */
+function nameTag(text: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d')!;
+  const font = '500 34px "Mona Sans Variable", system-ui, sans-serif';
+  context.font = font;
+  canvas.width = Math.ceil(context.measureText(text).width) + 16;
+  canvas.height = 56;
+  context.font = font;
+  context.textBaseline = 'middle';
+  context.lineJoin = 'round';
+  context.strokeStyle = 'rgba(12, 10, 9, 0.92)';
+  context.lineWidth = 9;
+  context.strokeText(text, 8, 30);
+  context.fillStyle = '#eaf0f8';
+  context.fillText(text, 8, 30);
+  const tag = sprite(canvas, LABEL_SIZE);
+  // Sits to the right of the glyph, clear of it.
+  tag.center.set(-(GLYPH_SIZE * 0.75) / tag.scale.x, 0.5);
+  return tag;
+}
+
+/** Lines and markers drawn over the terrain: planned routes, science stops, Perseverance's real path. */
 export class Markers {
   readonly group = new THREE.Group();
-  readonly traverse = new THREE.Group();
-  /** Walk-back limit rings around the shelters. */
-  readonly limits = new THREE.Group();
+  /** Switches for Perseverance's path and the walk-back limit lines. */
+  showTraverse = true;
+  showLimits = true;
+  private readonly traverse = new THREE.Group();
+  private readonly limits = new THREE.Group();
   private readonly routes = new THREE.Group();
+  /** The routes not picked: shown on the map only. */
+  private readonly others = new THREE.Group();
   private readonly stops = new THREE.Group();
   private readonly pins = new THREE.Group();
   private readonly lineMaterials: LineMaterial[] = [];
   private readonly destination: THREE.Group;
-  private readonly base = new THREE.Group();
+  private readonly base: THREE.Group;
   private readonly you: THREE.Mesh;
+  private mapView: boolean | null = null;
 
   constructor(private readonly site: SiteData, readonly mission: Mission) {
-    this.group.add(this.traverse, this.limits, this.routes, this.stops, this.pins);
+    this.group.add(this.traverse, this.limits, this.others, this.routes, this.stops, this.pins);
     for (const path of mission.traverse.paths) {
-      this.traverse.add(this.line(path.map(([x, z]) => ({ x, z })), () => '#7fd8ff', 2.5, 0.9));
+      this.traverse.add(this.line(path.map(([x, z]) => ({ x, z })), () => '#7fd8ff', 1.5, 0.75));
     }
-    for (const stop of mission.stops) this.stops.add(this.beacon(stop));
+    for (const stop of mission.stops) {
+      const mark = this.mark('diamond', '#74c7f4', stop.name);
+      mark.position.set(stop.x, this.site.groundAt(stop.x, stop.z) + 2, stop.z);
+      this.stops.add(mark);
+    }
     // "You are here" arrow for the map view.
     const arrow = new THREE.Shape();
     arrow.moveTo(0, 16);
@@ -86,59 +152,57 @@ export class Markers {
     arrow.lineTo(0, -5);
     arrow.lineTo(-10, -11);
     arrow.closePath();
-    this.you = new THREE.Mesh(new THREE.ShapeGeometry(arrow), new THREE.MeshBasicMaterial({ color: '#ff8a3d', depthTest: false, fog: false, side: THREE.DoubleSide }));
+    this.you = new THREE.Mesh(new THREE.ShapeGeometry(arrow), new THREE.MeshBasicMaterial({ color: '#eaf0f8', depthTest: false, fog: false, side: THREE.DoubleSide }));
     this.you.renderOrder = 30;
     this.you.visible = false;
-    this.group.add(this.you);
-    const baseLabel = labelSprite('BASE', '#f0a23b');
-    baseLabel.position.y = 30;
-    this.base.add(this.pin('#f0a23b', 1.2), baseLabel);
-    this.base.userData.label = baseLabel;
-    this.base.userData.labelSize = baseLabel.scale.clone();
-    this.group.add(this.base);
-    this.destination = this.pin('#ffffff');
+    this.base = this.mark('square', '#eaf0f8', 'Base');
+    this.destination = this.mark('ring', '#ffffff');
     this.destination.visible = false;
-    this.group.add(this.destination);
+    this.group.add(this.you, this.base, this.destination);
   }
 
   resize(width: number, height: number): void {
     for (const material of this.lineMaterials) material.resolution.set(width, height);
   }
 
-  /** Show routes; the selected one is drawn thick and colour-coded by risk, the others thin and grey. */
+  /** Show routes; the selected one is colour-coded by risk, the others thin and grey. */
   showRoutes(routes: Route[], selected: number): void {
     this.clear(this.routes);
+    this.clear(this.others);
     routes.forEach((route, index) => {
-      if (index === selected) return;
-      this.routes.add(this.line(route.points, () => '#d8cfc4', 2.5, 1.2, 0.6));
+      if (index !== selected) this.others.add(this.line(route.points, () => '#d8cfc4', 1.5, 0.55));
     });
     const route = routes[selected];
-    if (route) this.routes.add(this.line(route.points, (k) => RATING_COLORS[route.ratings[k]], 6, 1.6));
+    if (route) this.routes.add(this.line(route.points, (k) => RATING_COLORS[route.ratings[k]], 4));
     const turn = route?.stats.trip.turnBack;
     if (turn) {
-      const mark = this.pin('#ff5ad6', 0.8);
-      const label = labelSprite('TURN BACK', '#ff5ad6');
-      label.position.y = 30;
-      mark.add(label);
-      mark.position.set(turn.x, this.site.groundAt(turn.x, turn.z), turn.z);
+      const mark = this.mark('triangle', '#ff5ad6', 'Turn back');
+      mark.position.set(turn.x, this.site.groundAt(turn.x, turn.z) + 2, turn.z);
       this.routes.add(mark);
     }
+    this.applyView();
   }
 
-  /** Draw limit rings from flat [x1, z1, x2, z2, ...] segment lists. */
+  /** Draw limit lines from flat [x1, z1, x2, z2, ...] segment lists. */
   setLimits(rings: { segments: number[]; color: string }[]): void {
     this.clear(this.limits);
     for (const ring of rings) {
       if (!ring.segments.length) continue;
       const positions: number[] = [];
-      for (let k = 0; k < ring.segments.length; k += 2) {
-        const x = ring.segments[k];
-        const z = ring.segments[k + 1];
-        positions.push(x, this.site.groundAt(x, z) + 1.4, z);
+      for (let k = 0; k < ring.segments.length; k += 4) {
+        const [x1, z1, x2, z2] = ring.segments.slice(k, k + 4);
+        const parts = Math.max(1, Math.ceil(Math.hypot(x2 - x1, z2 - z1) / LINE_STEP));
+        for (let p = 0; p < parts; p += 1) {
+          for (const t of [p / parts, (p + 1) / parts]) {
+            const x = x1 + (x2 - x1) * t;
+            const z = z1 + (z2 - z1) * t;
+            positions.push(x, this.site.groundAt(x, z) + LIFT, z);
+          }
+        }
       }
       const geometry = new LineSegmentsGeometry();
       geometry.setPositions(positions);
-      const material = new LineMaterial({ color: ring.color, linewidth: 2.5, transparent: true, opacity: 0.85, depthTest: false, fog: false });
+      const material = new LineMaterial({ color: ring.color, linewidth: 1.5, transparent: true, opacity: 0.8 });
       material.resolution.set(window.innerWidth, window.innerHeight);
       this.lineMaterials.push(material);
       const line = new LineSegments2(geometry, material);
@@ -146,50 +210,52 @@ export class Markers {
       line.frustumCulled = false;
       this.limits.add(line);
     }
+    this.applyView();
   }
 
   setBase(point: RoutePoint): void {
-    this.base.position.set(point.x, this.site.groundAt(point.x, point.z), point.z);
+    this.base.position.set(point.x, this.site.groundAt(point.x, point.z) + 2, point.z);
   }
 
   setDestination(point: RoutePoint | null): void {
     this.destination.visible = Boolean(point);
-    if (point) this.destination.position.set(point.x, this.site.groundAt(point.x, point.z), point.z);
+    if (point) this.destination.position.set(point.x, this.site.groundAt(point.x, point.z) + 2, point.z);
   }
 
-  /** Numbered pins for a hand-drawn route. */
+  /** Dots for the points of a hand-drawn route. */
   setPins(points: RoutePoint[]): void {
     this.clear(this.pins);
     for (const point of points) {
-      const pin = this.pin('#ffe9a8', 0.6);
-      pin.position.set(point.x, this.site.groundAt(point.x, point.z), point.z);
+      const pin = this.mark('dot', '#ffe9a8');
+      pin.position.set(point.x, this.site.groundAt(point.x, point.z) + 2, point.z);
       this.pins.add(pin);
     }
+    this.applyView();
   }
 
-  /** Scale beacons so they stay readable from the map view. */
+  /** Per frame: the map shows everything on top; on the ground, hills hide what is behind them and names show only nearby. */
   update(camera: THREE.Camera, mapView: boolean, traveller: THREE.Vector3, heading: number): void {
-    const scale = mapView ? Math.max(1, (camera.position.y - traveller.y) / 500) : 1;
+    if (mapView !== this.mapView) {
+      this.mapView = mapView;
+      this.applyView();
+    }
+    this.traverse.visible = this.showTraverse && mapView;
+    this.limits.visible = this.showLimits;
+    this.others.visible = mapView;
     this.you.visible = mapView;
     if (mapView) {
       this.you.position.set(traveller.x, traveller.y + 25, traveller.z);
       // Shape points along +y; lay it flat with the tip toward the heading (+z at heading 0).
       this.you.rotation.set(Math.PI / 2, 0, heading, 'YXZ');
-      this.you.scale.setScalar(scale * 1.6);
+      this.you.scale.setScalar(Math.max(1, (camera.position.y - traveller.y) / 500) * 0.9);
     }
-    for (const beacon of this.stops.children) {
-      beacon.scale.setScalar(scale);
-      // Labels are sized in screen space already; undo the beacon scale.
-      const size = beacon.userData.labelSize as THREE.Vector3;
-      (beacon.userData.label as THREE.Sprite).scale.copy(size).divideScalar(scale);
-      // On the ground, far-away names pile up on the horizon: show only the ones within reach.
-      const label = beacon.userData.label as THREE.Sprite;
-      label.visible = mapView || beacon.position.distanceTo(camera.position) < 1300;
+    for (const mark of [...this.stops.children, this.base]) {
+      const away = mark.position.distanceTo(camera.position);
+      const tag = mark.userData.tag as THREE.Sprite | undefined;
+      if (tag) tag.visible = mapView || away < LABEL_RANGE;
     }
-    this.destination.scale.setScalar(scale);
-    this.base.scale.setScalar(scale);
-    (this.base.userData.label as THREE.Sprite).scale.copy(this.base.userData.labelSize as THREE.Vector3).divideScalar(scale);
-    for (const pin of this.pins.children) pin.scale.setScalar(scale);
+    // Standing at the base, the lander itself marks it.
+    this.base.visible = mapView || this.base.position.distanceTo(traveller) > 80;
   }
 
   nearestStop(x: number, z: number, radius: number): Stop | null {
@@ -205,19 +271,42 @@ export class Markers {
     return best;
   }
 
-  private line(points: RoutePoint[], color: (index: number) => string, width: number, lift: number, opacity = 1): Line2 {
+  /** Lines and markers are drawn on top in the map view and hidden by terrain and haze on the ground. */
+  private applyView(): void {
+    const onTop = this.mapView !== false;
+    for (const material of this.lineMaterials) {
+      if (material.depthTest === !onTop && material.fog === !onTop) continue;
+      material.depthTest = !onTop;
+      material.fog = !onTop;
+      material.needsUpdate = true;
+    }
+    this.group.traverse((object) => {
+      const material = (object as THREE.Sprite).material;
+      if ((object as THREE.Sprite).isSprite) (material as THREE.SpriteMaterial).depthTest = !onTop;
+    });
+  }
+
+  /** A line laid on the ground, resampled so it follows the terrain between its points. */
+  private line(points: RoutePoint[], color: (index: number) => string, width: number, opacity = 1): Line2 {
     const positions: number[] = [];
     const colors: number[] = [];
     const tint = new THREE.Color();
-    points.forEach((point, k) => {
-      positions.push(point.x, this.site.groundAt(point.x, point.z) + lift, point.z);
-      tint.set(color(k));
+    const push = (x: number, z: number) => {
+      positions.push(x, this.site.groundAt(x, z) + LIFT, z);
       colors.push(tint.r, tint.g, tint.b);
+    };
+    points.forEach((point, k) => {
+      tint.set(color(k));
+      push(point.x, point.z);
+      const next = points[k + 1];
+      if (!next) return;
+      const parts = Math.ceil(Math.hypot(next.x - point.x, next.z - point.z) / LINE_STEP);
+      for (let p = 1; p < parts; p += 1) push(point.x + ((next.x - point.x) * p) / parts, point.z + ((next.z - point.z) * p) / parts);
     });
     const geometry = new LineGeometry();
     geometry.setPositions(positions);
     geometry.setColors(colors);
-    const material = new LineMaterial({ linewidth: width, vertexColors: true, transparent: opacity < 1, opacity, depthTest: false, fog: false });
+    const material = new LineMaterial({ linewidth: width, vertexColors: true, transparent: opacity < 1, opacity });
     material.resolution.set(window.innerWidth, window.innerHeight);
     this.lineMaterials.push(material);
     const line = new Line2(geometry, material);
@@ -226,42 +315,15 @@ export class Markers {
     return line;
   }
 
-  private beacon(stop: Stop): THREE.Group {
+  /** A glyph with an optional name beside it. */
+  private mark(shape: Shape, color: string, name = ''): THREE.Group {
     const group = new THREE.Group();
-    const color = '#59e0ff';
-    const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.5, 60, 8, 1, true),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.45, depthWrite: false, fog: false, side: THREE.DoubleSide }),
-    );
-    beam.position.y = 30;
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(5.5, 6, 48),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false, fog: false, side: THREE.DoubleSide }),
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.6;
-    ring.renderOrder = 9;
-    const label = labelSprite(stop.name, color);
-    label.position.y = 66;
-    group.add(beam, ring, label);
-    group.position.set(stop.x, this.site.groundAt(stop.x, stop.z), stop.z);
-    group.userData.stop = stop;
-    group.userData.label = label;
-    group.userData.labelSize = label.scale.clone();
-    return group;
-  }
-
-  private pin(color: string, size = 1): THREE.Group {
-    const group = new THREE.Group();
-    const material = new THREE.MeshBasicMaterial({ color, depthTest: false, fog: false });
-    const head = new THREE.Mesh(new THREE.SphereGeometry(3 * size, 16, 12), material);
-    head.position.y = 16 * size;
-    const stem = new THREE.Mesh(new THREE.ConeGeometry(2.2 * size, 14 * size, 12), material);
-    stem.rotation.x = Math.PI;
-    stem.position.y = 7 * size;
-    head.renderOrder = 15;
-    stem.renderOrder = 15;
-    group.add(head, stem);
+    group.add(glyph(shape, color));
+    if (name) {
+      const tag = nameTag(name);
+      group.add(tag);
+      group.userData.tag = tag;
+    }
     return group;
   }
 

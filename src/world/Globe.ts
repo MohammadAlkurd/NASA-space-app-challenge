@@ -12,19 +12,21 @@ export interface GlobeSite {
   note: string;
   /** True when this build has walkable terrain for the site. */
   primary?: boolean;
+  /** A real surface photo taken there: file under data/globe/sites, credit, NASA image id. */
+  photo: { file: string; credit: string; id: string };
 }
 
 /** Where NASA has landed on Mars. Only Jezero has walkable terrain in this build. */
 export const SITES: GlobeSite[] = [
-  { name: 'Jezero Crater · Perseverance', lat: 18.44, lon: 77.45, primary: true, mission: 'Rover, landed 2021', note: 'An ancient river delta and lake bed. Perseverance collects rock samples here to look for signs of past life.' },
-  { name: 'Gale Crater · Curiosity', lat: -4.59, lon: 137.44, mission: 'Rover, landed 2012', note: 'A lake bed at the foot of Mount Sharp. Curiosity made the first radiation measurements on the surface of Mars here.' },
-  { name: 'Elysium Planitia · InSight', lat: 4.5, lon: 135.62, mission: 'Lander, 2018 to 2022', note: 'A flat lava plain. InSight recorded marsquakes and daily weather here.' },
-  { name: 'Gusev Crater · Spirit', lat: -14.57, lon: 175.47, mission: 'Rover, 2004 to 2010', note: 'Spirit found silica left by hot springs in the Columbia Hills.' },
-  { name: 'Meridiani Planum · Opportunity', lat: -1.95, lon: -5.53, mission: 'Rover, 2004 to 2018', note: 'Opportunity drove 45 km here and found minerals that form in water. A global dust storm ended the mission.' },
-  { name: 'Chryse Planitia · Viking 1', lat: 22.27, lon: -47.95, mission: 'Lander, 1976 to 1982', note: 'The first long-lived lander on Mars. It took the first surface weather record.' },
-  { name: 'Ares Vallis · Pathfinder', lat: 19.13, lon: -33.22, mission: 'Lander and Sojourner rover, 1997', note: 'A rocky flood plain. Sojourner was the first rover on Mars.' },
-  { name: 'Utopia Planitia · Viking 2', lat: 47.64, lon: 134.29, mission: 'Lander, 1976 to 1980', note: 'A northern plain where Viking 2 saw frost on the ground in winter.' },
-  { name: 'Vastitas Borealis · Phoenix', lat: 68.22, lon: -125.75, mission: 'Lander, 2008', note: 'Arctic plain. Phoenix dug up water ice just under the soil.' },
+  { name: 'Jezero Crater · Perseverance', lat: 18.44, lon: 77.45, primary: true, mission: 'Rover, landed 2021', note: 'An ancient river delta and lake bed. Perseverance collects rock samples here to look for signs of past life.', photo: { file: 'jezero.jpg', credit: 'NASA/JPL-Caltech', id: 'Perseverance Navcam, sol 13' } },
+  { name: 'Gale Crater · Curiosity', lat: -4.59, lon: 137.44, mission: 'Rover, landed 2012', note: 'A lake bed at the foot of Mount Sharp. Curiosity made the first radiation measurements on the surface of Mars here.', photo: { file: 'gale.jpg', credit: 'NASA/JPL-Caltech/MSSS', id: 'PIA16101' } },
+  { name: 'Elysium Planitia · InSight', lat: 4.5, lon: 135.62, mission: 'Lander, 2018 to 2022', note: 'A flat lava plain. InSight recorded marsquakes and daily weather here.', photo: { file: 'insight.jpg', credit: 'NASA/JPL-Caltech', id: 'PIA22575' } },
+  { name: 'Gusev Crater · Spirit', lat: -14.57, lon: 175.47, mission: 'Rover, 2004 to 2010', note: 'Spirit found silica left by hot springs in the Columbia Hills.', photo: { file: 'gusev.jpg', credit: 'NASA/JPL-Caltech/Cornell Univ.', id: 'PIA17760' } },
+  { name: 'Meridiani Planum · Opportunity', lat: -1.95, lon: -5.53, mission: 'Rover, 2004 to 2018', note: 'Opportunity drove 45 km here and found minerals that form in water. A global dust storm ended the mission.', photo: { file: 'meridiani.jpg', credit: 'NASA/JPL-Caltech/Cornell Univ./Arizona State Univ.', id: 'PIA19109' } },
+  { name: 'Chryse Planitia · Viking 1', lat: 22.27, lon: -47.95, mission: 'Lander, 1976 to 1982', note: 'The first long-lived lander on Mars. It took the first surface weather record.', photo: { file: 'viking1.jpg', credit: 'NASA/JPL', id: 'PIA00563' } },
+  { name: 'Ares Vallis · Pathfinder', lat: 19.13, lon: -33.22, mission: 'Lander and Sojourner rover, 1997', note: 'A rocky flood plain. Sojourner was the first rover on Mars.', photo: { file: 'pathfinder.jpg', credit: 'NASA/JPL', id: 'PIA01120' } },
+  { name: 'Utopia Planitia · Viking 2', lat: 47.64, lon: 134.29, mission: 'Lander, 1976 to 1980', note: 'A northern plain where Viking 2 saw frost on the ground in winter.', photo: { file: 'viking2.jpg', credit: 'NASA/JPL', id: 'PIA00568' } },
+  { name: 'Vastitas Borealis · Phoenix', lat: 68.22, lon: -125.75, mission: 'Lander, 2008', note: 'Arctic plain. Phoenix dug up water ice just under the soil.', photo: { file: 'phoenix.jpg', credit: 'NASA/JPL-Caltech/University of Arizona/Texas A&M University', id: 'PIA13804' } },
 ];
 
 /** Unit vector for planetocentric latitude / east longitude on a sphere textured with lon -180..180. */
