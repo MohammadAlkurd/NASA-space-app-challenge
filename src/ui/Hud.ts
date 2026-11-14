@@ -34,9 +34,30 @@ export interface Telemetry {
   verdict: string;
   verdictReason: string;
   solarWm2: number;
+  /** Rover solar panel output right now, watts. */
+  panelW: number;
+  /** Expected panel energy over one sol at this spot, kWh. */
+  panelDayKWh: number;
+  inShadow: boolean;
+  /** Set while the crew is sheltering inside the parked rover. */
+  camping: boolean;
+  /** Label of the shelter button for the current situation. */
+  shelterAction: string;
+  map: MiniMap;
   /** Guidance while following a route. */
   guidance: string;
 }
+
+/** What the minimap shows; positions are map metres (+x east, +z south). */
+export interface MiniMap {
+  half: number;
+  you: { x: number; z: number; heading: number };
+  rover: { x: number; z: number };
+  base: { x: number; z: number };
+  stop: Stop;
+}
+
+const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
 
 export interface HudActions {
   start(): void;
@@ -46,6 +67,7 @@ export interface HudActions {
   toggleView(): void;
   toggleCamera(): void;
   setTimeScale(scale: number): void;
+  shelter(): void;
   setHour(hour: number): void;
   setScenario(scenario: 'clear' | 'dust' | 'solar'): void;
   setTool(tool: Tool): void;
@@ -71,6 +93,7 @@ const LAYERS: { id: LayerId; name: string; source: string; legend: string }[] = 
   },
   { id: 'elevation', name: 'Elevation', source: 'HiRISE stereo elevation, tied to MOLA', legend: '<i style="background:#26468c"></i>Low <i style="background:#82be6e"></i> <i style="background:#e6d778"></i> <i style="background:#aa4632"></i>High, lines every 10 m' },
   { id: 'radiation', name: 'Radiation', source: 'Curiosity RAD dose + sky visibility', legend: '<i style="background:#eb3c96"></i>Open sky, full dose <i style="background:#23d2d2"></i>Sheltered by terrain' },
+  { id: 'solar', name: 'Solar power', source: 'Estimate: sun path + HiRISE terrain shadows + dust', legend: '<i style="background:#2846aa"></i>30 % less sun or worse (slopes, shadow) <i style="background:#ffdc28"></i>Full sun all sol: best for panels' },
   { id: 'thermal', name: 'Heat', source: 'THEMIS infrared, Mars Odyssey (100 m)', legend: '<i style="background:#3b1a6e"></i>Cooler in daytime <i style="background:#ffe066"></i>Warmer (dust, dark sand)' },
 ];
 
@@ -131,9 +154,12 @@ export class Hud {
           <div><dt>UV index <abbr title="Estimated from the sun's height, not measured">est.</abbr></dt><dd id="t-uv"></dd></div>
           <div><dt>Radiation</dt><dd id="t-dose-rate"></dd></div>
           <div><dt>Dose this trip</dt><dd id="t-dose"></dd></div>
+          <div><dt>Solar now <abbr title="Estimated for the rover's 4 m² panel from sun height, dust and terrain shadow">est.</abbr></dt><dd id="t-solar"></dd></div>
+          <div><dt>Solar per sol <abbr title="Estimated energy the rover's panel collects here over one Mars day">est.</abbr></dt><dd id="t-solar-day"></dd></div>
         </dl>
         <div id="t-space" class="space"><b></b><span></span></div>
         <div id="t-verdict" class="status"><b></b><span></span></div>
+        <button id="shelter-button"></button>
         <div class="segmented small" id="scenario" title="Clear sol is measured weather; the storms are drills">
           <button data-scenario="clear" class="active">Clear sol</button>
           <button data-scenario="dust">Dust storm</button>
@@ -157,6 +183,15 @@ export class Hud {
         <div id="layer-list" class="layer-list"></div>
         <p id="legend" class="legend"></p>
         <label class="check"><input id="traverse" type="checkbox" checked /> Perseverance's real path</label>
+        <div id="nearby">
+          <header><strong>Nearest science site</strong></header>
+          <canvas id="minimap" width="440" height="300"></canvas>
+          <p class="legend"><i style="background:#ffb000"></i>You <i style="background:#fff"></i>Rover <i style="background:#ff5a3c"></i>Lander <i style="background:#6fd6ee"></i>Site</p>
+          <p id="near-name"></p>
+          <img id="near-photo" class="pov" alt="" title="Click to enlarge" hidden />
+          <p id="near-credit" class="muted small"></p>
+          <button id="near-route">Plan a route there</button>
+        </div>
         <div class="row">
           <button id="view-button">Map view</button>
           <button id="cam-button">Helmet view</button>
@@ -197,6 +232,17 @@ export class Hud {
     });
     el<HTMLInputElement>(this.root, '#hour').addEventListener('input', (event) => actions.setHour(Number((event.target as HTMLInputElement).value)));
     el<HTMLInputElement>(this.root, '#traverse').addEventListener('change', (event) => actions.setTraverseVisible((event.target as HTMLInputElement).checked));
+    el(this.root, '#shelter-button').addEventListener('click', () => actions.shelter());
+    el(this.root, '#near-route').addEventListener('click', () => this.nearStop && actions.routeToStop(this.nearStop));
+    el(this.root, '#near-photo').addEventListener('click', () => {
+      const photo = this.nearStop?.photo;
+      if (!photo) return;
+      const view = el(this.root, '#photo');
+      el<HTMLImageElement>(view, 'img').src = `${this.photoBase}${photo.file}`;
+      el(view, 'p').textContent = `${photo.caption} Credit: ${photo.credit}`;
+      view.hidden = false;
+    });
+    this.mapImage.src = `${this.photoBase}ortho.jpg`;
     el(this.root, '#view-button').addEventListener('click', () => actions.toggleView());
     el(this.root, '#cam-button').addEventListener('click', () => actions.toggleCamera());
     el(this.root, '#about-button').addEventListener('click', () => (el(this.root, '#about').hidden = false));
@@ -276,9 +322,17 @@ export class Hud {
     set('#t-wind', `${t.windMs.toFixed(1)} m/s`);
     const verdict = el(this.root, '#t-verdict');
     verdict.style.setProperty('--tone', t.verdict === 'GO' ? '#3ddc84' : t.verdict === 'NO-GO' ? '#ff3b3b' : '#ffd23f');
-    set('#t-verdict b', t.verdict);
-    set('#t-verdict span', `${t.verdictReason} Sunlight ${Math.round(t.solarWm2)} W/m².`);
+    if (t.camping) verdict.style.setProperty('--tone', '#6fd6ee');
+    set('#t-verdict b', t.camping ? 'SHELTERED' : t.verdict);
+    set('#t-verdict span', t.camping
+      ? `Camped in the rover: half the radiation, suit recharging. Outside: ${t.verdict}.`
+      : `${t.verdictReason} Sunlight ${Math.round(t.solarWm2)} W/m².`);
+    set('#shelter-button', t.shelterAction);
+    el(this.root, '#shelter-button').classList.toggle('primary', !t.camping && t.verdict === 'NO-GO');
+    this.drawNearby(t.map);
     set('#t-uv', t.uvIndex.toFixed(0));
+    set('#t-solar', t.inShadow ? `${Math.round(t.panelW)} W · in shadow` : `${Math.round(t.panelW)} W`);
+    set('#t-solar-day', `${t.panelDayKWh.toFixed(1)} kWh`);
     set('#t-dose-rate', `${t.doseRate.toFixed(1)} µSv/h`);
     set('#t-dose', `${t.doseTotal.toFixed(1)} µSv`);
     const space = el(this.root, '#t-space');
@@ -293,6 +347,96 @@ export class Hud {
     const guidance = el(this.root, '#guidance');
     guidance.hidden = !t.guidance;
     set('#guidance', t.guidance);
+  }
+
+  /** Minimap of you, the rover, the lander and the nearest science site, plus that site's real photo. */
+  private drawNearby(map: MiniMap): void {
+    const { you, stop } = map;
+    const distance = Math.hypot(stop.x - you.x, stop.z - you.z);
+    if (stop !== this.nearStop) {
+      this.nearStop = stop;
+      const photo = el<HTMLImageElement>(this.root, '#near-photo');
+      photo.hidden = !stop.photo;
+      if (stop.photo) {
+        photo.src = `${this.photoBase}${stop.photo.file}`;
+        photo.alt = stop.photo.title;
+      }
+      el(this.root, '#near-credit').innerHTML = stop.photo
+        ? `Perseverance's view there, sol ${stop.photo.sol}. Image: ${escapeHtml(stop.photo.credit)} · <a href="${stop.photo.link}" target="_blank" rel="noopener">source</a>`
+        : '';
+    }
+    // Compass bearing: north is -z on the map.
+    const bearing = (Math.atan2(stop.x - you.x, -(stop.z - you.z)) * 180) / Math.PI;
+    const compass = COMPASS[Math.round(((bearing + 360) % 360) / 45) % 8];
+    el(this.root, '#near-name').innerHTML = `<b>${escapeHtml(stop.name)}</b> · ${distance >= 1000 ? `${(distance / 1000).toFixed(1)} km` : `${Math.round(distance)} m`} ${compass}`;
+
+    const canvas = el<HTMLCanvasElement>(this.root, '#minimap');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const { width, height } = canvas;
+    // Window wide enough to hold you and the site, centred between them.
+    const span = Math.max(500, distance * 1.5);
+    const metresPerPx = span / Math.min(width, height);
+    const cx = (you.x + stop.x) / 2;
+    const cz = (you.z + stop.z) / 2;
+    const px = (x: number) => width / 2 + (x - cx) / metresPerPx;
+    const py = (z: number) => height / 2 + (z - cz) / metresPerPx;
+    ctx.fillStyle = '#17120e';
+    ctx.fillRect(0, 0, width, height);
+    if (this.mapImage.complete && this.mapImage.naturalWidth) {
+      const scale = this.mapImage.naturalWidth / (map.half * 2);
+      ctx.drawImage(
+        this.mapImage,
+        (cx - (width / 2) * metresPerPx + map.half) * scale, (cz - (height / 2) * metresPerPx + map.half) * scale,
+        width * metresPerPx * scale, height * metresPerPx * scale,
+        0, 0, width, height,
+      );
+      // The orbital photo is grey: tint it to Mars colours like the 3D ground.
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = '#d99a6c';
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.strokeStyle = '#6fd6ee';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.moveTo(px(you.x), py(you.z));
+    ctx.lineTo(px(stop.x), py(stop.z));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const dot = (x: number, z: number, color: string, size: number) => {
+      ctx.fillStyle = color;
+      ctx.strokeStyle = '#0c0a09';
+      ctx.lineWidth = 2;
+      ctx.fillRect(px(x) - size, py(z) - size, size * 2, size * 2);
+      ctx.strokeRect(px(x) - size, py(z) - size, size * 2, size * 2);
+    };
+    dot(map.base.x, map.base.z, '#ff5a3c', 6);
+    dot(map.rover.x, map.rover.z, '#ffffff', 5);
+    dot(stop.x, stop.z, '#6fd6ee', 7);
+    // You: an arrow pointing the way you face.
+    ctx.save();
+    ctx.translate(px(you.x), py(you.z));
+    ctx.rotate(Math.atan2(Math.sin(you.heading), -Math.cos(you.heading)));
+    ctx.fillStyle = '#ffb000';
+    ctx.strokeStyle = '#0c0a09';
+    ctx.beginPath();
+    ctx.moveTo(0, -12);
+    ctx.lineTo(8, 9);
+    ctx.lineTo(0, 4);
+    ctx.lineTo(-8, 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    // Scale bar.
+    const bar = span > 2000 ? 500 : span > 800 ? 200 : 100;
+    ctx.fillStyle = '#f4efe6';
+    ctx.fillRect(12, height - 16, bar / metresPerPx, 3);
+    ctx.font = '600 18px "JetBrains Mono", monospace';
+    ctx.fillText(`${bar} m`, 12, height - 24);
+    ctx.fillText('N ↑', width - 52, 26);
   }
 
   setTool(tool: Tool): void {
@@ -367,6 +511,8 @@ export class Hud {
   }
 
   private timings: RouteTiming[] = [];
+  private nearStop: Stop | null = null;
+  private readonly mapImage = new Image();
 
   private renderPlanner(): void {
     const planner = el(this.root, '#planner');

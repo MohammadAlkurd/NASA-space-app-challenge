@@ -2,7 +2,18 @@ import * as THREE from 'three';
 import type { TravelProfile } from '../entities/Explorer';
 import type { SiteData } from '../world/SiteData';
 
-export type LayerId = 'optical' | 'hazard' | 'elevation' | 'radiation' | 'thermal';
+export type LayerId = 'optical' | 'hazard' | 'elevation' | 'radiation' | 'thermal' | 'solar';
+
+/** Sun position and sunlight reaching flat open ground at one moment. */
+export interface SunSample {
+  elevationDeg: number;
+  azimuthDeg: number;
+  wm2: number;
+}
+
+/** Share of sunlight that still arrives as sky glow when a hill blocks the sun itself. */
+const SHADE_SHARE = 0.25;
+const SHADOW_STEPS = [1, 2, 3, 4, 6, 8, 11, 15, 20, 27, 36, 48, 64, 84, 110];
 
 /** Planning grid resolution: 512 x 512 cells of 10 m over the 5.12 km map. */
 export const GRID = 512;
@@ -30,6 +41,9 @@ export class Analysis {
   /** Fraction of the sky hemisphere visible, 0..1. */
   readonly skyView = new Float32Array(GRID * GRID);
   readonly height = new Float32Array(GRID * GRID);
+  /** Expected solar energy on a flat panel over one sol, Wh per m2, for the current weather. */
+  solarDay: Float32Array | null = null;
+  private solarKey = '';
   private thermal: Uint8Array | null = null;
   private thermalSize = 0;
   private readonly textures = new Map<string, THREE.DataTexture>();
@@ -66,13 +80,14 @@ export class Analysis {
   /** RGBA overlay for a map layer; cached per layer (and per traveller for the hazard layer). */
   overlay(layer: LayerId, profile: TravelProfile): THREE.DataTexture | null {
     if (layer === 'optical') return null;
-    const key = layer === 'hazard' ? `hazard-${profile.mode}` : layer;
+    const key = layer === 'hazard' ? `hazard-${profile.mode}` : layer === 'solar' ? `solar-${this.solarKey}` : layer;
     let texture = this.textures.get(key);
     if (!texture) {
       const data = new Uint8Array(GRID * GRID * 4);
       if (layer === 'hazard') this.paintHazard(data, profile);
       else if (layer === 'elevation') this.paintElevation(data);
       else if (layer === 'radiation') this.paintRadiation(data);
+      else if (layer === 'solar') this.paintSolar(data);
       else this.paintThermal(data);
       texture = new THREE.DataTexture(data, GRID, GRID, THREE.RGBAFormat);
       texture.magFilter = THREE.LinearFilter;
@@ -83,6 +98,44 @@ export class Analysis {
       this.textures.set(key, texture);
     }
     return texture;
+  }
+
+  /** True when no terrain stands between this cell and the sun. */
+  sunlit(index: number, elevationDeg: number, azimuthDeg: number): boolean {
+    if (elevationDeg <= 0) return false;
+    const azimuth = (azimuthDeg * Math.PI) / 180;
+    const dx = Math.sin(azimuth);
+    const dz = -Math.cos(azimuth);
+    const tangent = Math.tan((elevationDeg * Math.PI) / 180);
+    const i = index % GRID;
+    const j = Math.floor(index / GRID);
+    const base = this.height[index] + 1.5;
+    for (const step of SHADOW_STEPS) {
+      const x = Math.round(i + dx * step);
+      const z = Math.round(j + dz * step);
+      if (x < 0 || z < 0 || x >= GRID || z >= GRID) break;
+      if ((this.height[z * GRID + x] - base) / (step * this.cell) > tangent) return false;
+    }
+    return true;
+  }
+
+  /** Sunlight on a flat panel at this cell right now, W per m2, with terrain shadow applied. */
+  solarAt(index: number, sun: SunSample): number {
+    if (sun.wm2 <= 0) return 0;
+    return sun.wm2 * (this.sunlit(index, sun.elevationDeg, sun.azimuthDeg) ? 1 : SHADE_SHARE * this.skyView[index]);
+  }
+
+  /** Add up one sol of sunlight per cell from evenly spaced sun samples; cached per `key`. */
+  setSolarDay(key: string, samples: SunSample[], stepHours: number): void {
+    if (key === this.solarKey && this.solarDay) return;
+    this.solarKey = key;
+    const day = this.solarDay ?? new Float32Array(GRID * GRID);
+    day.fill(0);
+    for (const sun of samples) {
+      if (sun.wm2 <= 0) continue;
+      for (let o = 0; o < GRID * GRID; o += 1) day[o] += this.solarAt(o, sun) * stepHours;
+    }
+    this.solarDay = day;
   }
 
   dispose(): void {
@@ -230,6 +283,18 @@ export class Analysis {
       const g = 60 + 150 * shelter;
       const b = 150 + 60 * shelter;
       data.set([r, g, b, 120 + 80 * shelter], o * 4);
+    }
+  }
+
+  private paintSolar(data: Uint8Array): void {
+    const day = this.solarDay;
+    if (!day) return;
+    let best = 1;
+    for (let o = 0; o < day.length; o += 1) if (day[o] > best) best = day[o];
+    // Shaded ground (deep blue) to full sun (yellow), relative to the best spot on this map.
+    for (let o = 0; o < day.length; o += 1) {
+      const t = Math.min(1, Math.max(0, (day[o] / best - 0.7) / 0.3));
+      data.set([40 + 215 * t, 70 + 150 * t, 170 - 130 * t, 185], o * 4);
     }
   }
 

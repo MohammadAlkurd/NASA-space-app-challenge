@@ -30,6 +30,8 @@ location that helps a human explorer plan and carry out a Marswalk safely.</p>
 <ul>
   <li><b>Measured:</b> terrain, slopes, photo, weather values, rover positions, photos.</li>
   <li><b>Estimated:</b> radiation on the ground at Jezero (Perseverance carries no radiation detector, so we scale Curiosity's Gale Crater dose by how much sky each spot sees), UV index (from the sun's height), rover energy (rolling resistance 0.15 plus climbing, 1025 kg, 50 % drive efficiency, 2.4 kWh battery), walking speed 0.9 m/s and rover speed 2.8 m/s.</li>
+  <li><b>Solar power (estimated):</b> sunlight from the sun's height and the dust in the air (590 W/m² above the atmosphere, dust optical depth 0.5 on the clear sol), cut where HiRISE terrain shades the spot. Panel output assumes the rover carries 4 m² of panels at 27 % efficiency.</li>
+  <li><b>Storm drills (modelled, not live weather):</b> the dust storm raises dust optical depth to 4, slows travel by 30 % and cuts sunlight; the solar storm doubles the radiation dose. Mars has no hurricanes: its hazards are dust storms, dust devils, wind, cold and solar particle storms. Camping in the rover is assumed to halve the dose.</li>
   <li><b>Limits:</b> slope limits are 20° on foot and 25° for the rover. Rocks smaller than the 2.5 m grid are not seen by the planner. Fine surface texture near the camera is procedural. Weather is one real sol, not a forecast.</li>
 </ul>
 

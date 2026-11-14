@@ -18,6 +18,9 @@ Source: https://www.spaceappschallenge.org/2026/challenges/interplanetary-surviv
 
 Extras beyond the page: draw-your-own route with live safety check and comparison against the planner,
 GeoJSON/CSV export, base-site scoring with explanations, time-of-day weather from a real MEDA sol.
+Also: set the base anywhere (a lander marks it), weather go/no-go with dust-storm and solar-storm drills, routes rated for
+the hours they cover with a suggested leaving time, Mars clock tied to real travel speed, solar-power layer and panel
+output estimate, rover as a movable shelter to camp in, nearest-science-site photo with a minimap.
 
 Submission reminders: the team must be registered under **Martian Map**; cite all sources (README, Sources panel);
 describe AI use (README, Sources panel); no NASA logos.

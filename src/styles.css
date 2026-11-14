@@ -88,6 +88,13 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; heigh
 .legend i { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 8px; vertical-align: -1px; }
 .legend i:first-child { margin-left: 0; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 15px; cursor: pointer; padding: 6px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+#nearby { display: grid; gap: 6px; }
+#nearby header { padding: 0; }
+#minimap { width: 100%; display: block; border: 1px solid var(--line); }
+#nearby .pov { width: 100%; max-height: 120px; object-fit: cover; cursor: zoom-in; display: block; border: 1px solid var(--line); }
+#near-name { font-size: 15px; }
+#nearby .legend { min-height: 0; }
+#shelter-button { width: 100%; }
 .check input { accent-color: #7fd8ff; width: 16px; height: 16px; margin: 0; }
 #layers .row { margin-top: auto; }
 
@@ -160,6 +167,7 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; heigh
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 @media (max-width: 860px) {
   :root { --rail: 0px; }
+  #nearby { display: none; }
   #telemetry, #layers { bottom: auto; width: 50vw; padding: 8px 10px; gap: 6px; border-bottom: 1px solid var(--line); max-height: 46vh; }
   #telemetry dl div:nth-child(n + 3):nth-child(-n + 7), .clock label, #telemetry header span, .layer-list span, .legend, #t-reserve-text { display: none; }
   .status b { font-size: 20px; }
