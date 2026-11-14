@@ -14,6 +14,7 @@ import {
   type Route, type RoutePoint,
 } from '../planning/Router';
 import { Hud, type Tool } from '../ui/Hud';
+import { Globe } from '../world/Globe';
 import { Markers, type Mission, type Stop } from '../world/Markers';
 import { Rocks } from '../world/Rocks';
 import { loadSite, type SiteData } from '../world/SiteData';
@@ -43,6 +44,8 @@ export class Game {
   private environment!: Environment;
   private scorer!: BaseSiteScorer;
   private rocks!: Rocks;
+  private globe: Globe | null = null;
+  private readonly fade = document.querySelector<HTMLElement>('#fade');
 
   private ready = false;
   private started = false;
@@ -97,9 +100,11 @@ export class Game {
       findBestBase: () => this.showBase(this.scorer.findBest(), true),
       routeToBase: () => this.lastBase && this.planTo(this.lastBase),
     }, `${import.meta.env.BASE_URL}data/jezero/`);
+    this.globe = new Globe(`${import.meta.env.BASE_URL}data/globe/`);
     window.addEventListener('resize', this.onResize);
     this.bindPointer();
     this.onResize();
+    this.loop.start();
   }
 
   async start(): Promise<void> {
@@ -137,7 +142,6 @@ export class Game {
     this.astronaut.place(landing.x - 4, landing.z + 5, -Math.PI / 2);
     this.lastPosition.copy(this.astronaut.position);
     this.rig.distance = 11;
-    this.rig.yaw = 0.7;
 
     this.hud.setLayer(this.layer);
     this.hud.setTraveller(this.traveller);
@@ -149,7 +153,6 @@ export class Game {
     this.onResize();
     this.ready = true;
     this.exposeDebug();
-    this.loop.start();
   }
 
   dispose(): void {
@@ -160,6 +163,7 @@ export class Game {
     this.sky?.dispose();
     this.analysis?.dispose();
     this.rocks?.dispose();
+    this.globe?.dispose();
     this.renderer.dispose();
   }
 
@@ -167,10 +171,20 @@ export class Game {
     return this.traveller === 'rover' ? this.rover : this.astronaut;
   }
 
+  /** Start pressed: dive from orbit to Jezero, then hand over to the surface. */
   private begin(): void {
+    if (this.globe) this.globe.startDive();
+    else this.land();
+  }
+
+  private land(): void {
+    this.globe?.dispose();
+    this.globe = null;
     this.started = true;
     this.rig.yaw = 0;
+    this.hud.showPanels();
     this.pushTelemetry();
+    if (this.fade) this.fade.style.opacity = '0';
   }
 
   // ---- modes -------------------------------------------------------------------------------
@@ -422,14 +436,21 @@ export class Game {
   // ---- frame -------------------------------------------------------------------------------
 
   private update(dt: number, time: number): void {
-    if (!this.ready) return;
     this.elapsed = time;
     this.frame += 1;
+    if (this.globe) {
+      this.globe.update();
+      // Fade to dust over the last part of the dive.
+      if (this.fade) this.fade.style.opacity = String(THREE.MathUtils.smoothstep(this.globe.progress, 0.72, 0.98));
+      if (this.globe.progress >= 1 && this.ready) this.land();
+      this.input.endFrame();
+      if (this.ready) this.publishDiagnostics();
+      return;
+    }
+    if (!this.ready) return;
     const explorer = this.active;
 
-    if (!this.started) {
-      this.rig.yaw += dt * 0.06;
-    } else {
+    if (this.started) {
       if (this.input.consume('KeyC')) this.setCamera(this.rig.mode === 'first' ? 'chase' : 'first');
       if (this.input.consume('KeyM')) this.setCamera(this.rig.mode === 'map' ? this.groundMode : 'map');
       const manual = this.input.throttle !== 0 || this.input.steer !== 0;
@@ -513,7 +534,8 @@ export class Game {
   }
 
   private render(): void {
-    if (this.ready) this.renderer.render(this.scene, this.camera);
+    if (this.globe) this.renderer.render(this.globe.scene, this.globe.camera);
+    else if (this.ready) this.renderer.render(this.scene, this.camera);
   }
 
   // ---- input -------------------------------------------------------------------------------
@@ -576,14 +598,17 @@ export class Game {
     });
     this.canvas.addEventListener('pointermove', (event) => {
       const last = pointers.get(event.pointerId);
-      if (!last || !this.ready) return;
-      if (pointers.size === 1) this.rig.drag(event.clientX - last.x, event.clientY - last.y);
+      if (!last) return;
+      if (pointers.size === 1) {
+        if (this.globe) this.globe.drag(event.clientX - last.x, event.clientY - last.y);
+        else if (this.ready) this.rig.drag(event.clientX - last.x, event.clientY - last.y);
+      }
       last.x = event.clientX;
       last.y = event.clientY;
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         const spread = Math.hypot(a.x - b.x, a.y - b.y);
-        if (pinch > 0 && spread > 0) this.rig.zoom(pinch / spread);
+        if (pinch > 0 && spread > 0 && this.ready && !this.globe) this.rig.zoom(pinch / spread);
         pinch = spread;
       }
     });
@@ -599,7 +624,7 @@ export class Game {
     this.canvas.addEventListener('pointercancel', end);
     this.canvas.addEventListener('wheel', (event) => {
       event.preventDefault();
-      if (this.ready) this.rig.zoom(Math.exp(event.deltaY * 0.0012));
+      if (this.ready && !this.globe) this.rig.zoom(Math.exp(event.deltaY * 0.0012));
     }, { passive: false });
   }
 
@@ -610,6 +635,7 @@ export class Game {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.globe?.resize(width / height);
     this.markers?.resize(width, height);
   };
 

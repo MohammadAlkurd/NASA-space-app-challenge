@@ -40,8 +40,11 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await page.waitForFunction(() => (window.__THREE_GAME_DIAGNOSTICS__?.frame ?? 0) > 3, null, { timeout: 60_000 });
   expect(await canvasIsNonBlank(page)).toMatchObject({ ok: true });
 
+  // Start: dive from the globe to the surface.
   await page.click('#start-button');
+  await page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__?.started === true, null, { timeout: 60_000 });
   await expect(page.locator('#telemetry')).toBeVisible();
+  expect(await canvasIsNonBlank(page)).toMatchObject({ ok: true });
   await expect(page.locator('#t-air')).toContainText('°C');
   await expect(page.locator('#t-dose-rate')).toContainText('µSv/h');
 

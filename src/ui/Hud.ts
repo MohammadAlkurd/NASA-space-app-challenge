@@ -90,7 +90,7 @@ export class Hud {
         <div class="start-card">
           <p class="eyebrow">NASA Space Apps 2026 · Interplanetary Survival Guide: Martian Map</p>
           <h1>Mars Base Explorer</h1>
-          <p class="lead">Plan a safe Marswalk in Jezero Crater on real NASA data: terrain, weather, radiation and rover photos in one map.</p>
+          <p class="lead">Land in Jezero Crater and plan a safe Marswalk on real NASA data: terrain, weather, radiation and rover photos in one map.</p>
           <ol class="steps">
             <li><b>Click</b> anywhere on Mars to get safe routes.</li>
             <li><b>Pick</b> a route and press Go.</li>
@@ -165,7 +165,6 @@ export class Hud {
 
     el<HTMLButtonElement>(this.root, '#start-button').addEventListener('click', () => {
       el(this.root, '#start').hidden = true;
-      for (const id of ['#telemetry', '#layers', '#planner']) el(this.root, id).hidden = false;
       actions.start();
     });
     el(this.root, '#traveller').addEventListener('click', (event) => {
@@ -193,6 +192,11 @@ export class Hud {
 
     el(this.root, '#planner').addEventListener('click', (event) => this.onPlannerClick(event));
     this.renderPlanner();
+  }
+
+  /** Reveal the working panels once the traveller is on the surface. */
+  showPanels(): void {
+    for (const id of ['#telemetry', '#layers', '#planner']) el(this.root, id).hidden = false;
   }
 
   setReady(): void {

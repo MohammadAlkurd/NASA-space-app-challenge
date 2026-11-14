@@ -142,3 +142,7 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; }
   .routes { grid-auto-columns: 150px; }
   #toast { bottom: 290px; }
 }
+
+#fade { position: absolute; inset: 0; background: #cfa983; opacity: 0; pointer-events: none; transition: opacity 0.5s; }
+#start.overlay { background: none; place-items: center start; padding-left: clamp(16px, 6vw, 90px); }
+@media (max-width: 860px) { #start.overlay { place-items: end center; padding: 16px; } .start-card { padding: 18px; gap: 10px; } }
