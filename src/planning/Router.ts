@@ -51,12 +51,13 @@ export interface ScienceTarget extends RoutePoint {
 }
 
 // Rover energy model (documented in the Sources panel): rolling resistance + climbing,
-// Perseverance-class mass 1025 kg, Mars gravity 3.71 m/s^2, drivetrain efficiency 0.5.
-const ROVER_MASS = 1025;
+// pressurised crew rover of 3000 kg (the class of NASA's Space Exploration Vehicle concept),
+// Mars gravity 3.71 m/s^2, drivetrain efficiency 0.5.
+const ROVER_MASS = 3000;
 const MARS_G = 3.71;
 const ROLLING = 0.15;
 const DRIVE_EFFICIENCY = 0.5;
-export const ROVER_BATTERY_WH = 2400;
+export const ROVER_BATTERY_WH = 30000;
 
 /** Battery energy to drive `distance` metres while climbing `climb` metres. */
 export function roverEnergyWh(distance: number, climb: number): number {

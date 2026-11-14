@@ -71,7 +71,7 @@ python pipeline/build_mission.py jezero    # science stops, photos, weather, hea
 
 - `src/world` terrain, sky, markers, rocks · `src/planning` terrain analysis, route planner, base-site scoring
 - `src/data` weather and space weather · `src/entities` astronaut, rover · `src/ui` panels · `src/game` wiring
-- `pipeline/` Python data preparation · `public/data/` processed NASA data · `public/models/rover.glb` our own rover model
+- `pipeline/` Python data preparation · `public/data/` processed NASA data · `src/entities/Rover.ts` the pressurised crew rover, built in code
 
 ## Tools and AI use
 

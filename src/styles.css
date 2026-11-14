@@ -66,16 +66,24 @@ dl div:first-child { border-top: 1px solid var(--line); }
 dt { color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
 dd { margin: 0; font: 500 14px var(--font-data); font-variant-numeric: tabular-nums; white-space: nowrap; }
 abbr { text-decoration: none; font-size: 10px; letter-spacing: 0.08em; color: var(--accent); margin-left: 4px; }
-.space { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; }
-.space b { color: var(--muted); font-weight: 500; }
-.space span { font-weight: 700; }
-.space[data-status='quiet'] span { color: #3ddc84; }
-.space[data-status='elevated'] span { color: #ffd23f; }
-.space[data-status='storm'] span { color: #ff5c5c; }
 .clock { display: grid; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); }
 .clock label { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .clock label b { color: var(--text); font: 500 20px var(--font-data); letter-spacing: 0; }
 input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; height: 18px; }
+
+#telemetry h3 { margin: 4px 0 -6px; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
+.space dd { font: 700 13px var(--font-label); letter-spacing: 0.1em; text-transform: uppercase; }
+.space[data-status='quiet'] dd { color: #3ddc84; }
+.space[data-status='elevated'] dd { color: #ffd23f; }
+.space[data-status='storm'] dd { color: #ff5c5c; }
+
+/* Top bar: where you are looking from, the way back, and the weather drill. Always in the same place. */
+#topbar { top: 0; left: var(--rail); right: var(--rail); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.bar-group { display: flex; align-items: center; gap: 8px; }
+.bar-group > span { font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+#topbar button { min-height: 30px; padding: 6px 8px; font-size: 13px; white-space: nowrap; }
+#home-button { border-color: var(--science); color: var(--science); }
+#about-button { margin-left: auto; }
 
 /* Right rail: layers */
 #layers { top: 0; right: 0; bottom: 0; width: var(--rail); border-left: 1px solid var(--line); overflow-y: auto; }
@@ -101,7 +109,6 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; heigh
 .site-card { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
 .site-card h2 { font-size: 22px; line-height: 1.05; text-transform: uppercase; }
 .check input { accent-color: #7fd8ff; width: 16px; height: 16px; margin: 0; }
-#layers .row { margin-top: auto; }
 
 /* Bottom strip: planner */
 #planner { left: var(--rail); right: var(--rail); bottom: 0; border-top: 1px solid var(--line); padding: 10px 14px 12px; }
@@ -130,7 +137,7 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; heigh
 .criteria .meter > div { background: var(--accent); }
 
 #guidance {
-  position: absolute; z-index: 2; top: 14px; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 2 * var(--rail) - 40px);
+  position: absolute; z-index: 2; top: 62px; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 2 * var(--rail) - 40px);
   background: var(--panel); border: 1px solid var(--science); border-left-width: 4px; color: var(--text); padding: 8px 14px; font-size: 17px; font-weight: 600; letter-spacing: 0.03em;
 }
 #toast {
@@ -174,7 +181,9 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; heigh
   :root { --rail: 0px; }
   #nearby { display: none; }
   #telemetry, #layers { bottom: auto; width: 50vw; padding: 8px 10px; gap: 6px; border-bottom: 1px solid var(--line); max-height: 46vh; }
-  #telemetry dl div:nth-child(n + 3):nth-child(-n + 7), .clock label, #telemetry header span, .layer-list span, .legend, #t-reserve-text { display: none; }
+  #telemetry h3, #telemetry dl, .clock label, .clock p, #telemetry header span, .layer-list span, .legend, #t-reserve-text, .bar-group > span { display: none; }
+  #telemetry, #layers { top: 44px; }
+  #topbar { left: 0; right: 0; flex-wrap: nowrap; overflow-x: auto; padding: 6px 8px; gap: 8px; height: 44px; }
   .status b { font-size: 20px; }
   .status span { min-height: 0; }
   .layer-list { grid-template-columns: 1fr 1fr; }

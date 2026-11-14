@@ -3,6 +3,7 @@ import * as THREE from 'three';
 const HORIZON = new THREE.Color('#d9b48c');
 const ZENITH = new THREE.Color('#9c7a5e');
 export const DUST_COLOR = new THREE.Color('#cfa983');
+export const STORM_COLOR = new THREE.Color('#b08055');
 
 /** Dusty Martian sky, sun and haze. The dome follows the camera. */
 export class Sky {
@@ -23,6 +24,8 @@ export class Sky {
         uHorizon: { value: HORIZON },
         uZenith: { value: ZENITH },
         uDay: { value: 1 },
+        uStorm: { value: 0 },
+        uStormColor: { value: new THREE.Color() },
       },
       vertexShader: /* glsl */ `
         varying vec3 vDir;
@@ -36,6 +39,8 @@ export class Sky {
         uniform vec3 uHorizon;
         uniform vec3 uZenith;
         uniform float uDay;
+        uniform float uStorm;
+        uniform vec3 uStormColor;
         varying vec3 vDir;
         void main() {
           vec3 dir = normalize(vDir);
@@ -45,13 +50,17 @@ export class Sky {
           float toSun = max(dot(dir, normalize(uSunDir)), 0.0);
           // Forward scattering by dust: a broad pale glow, bluish-white right around the sun.
           color += vec3(0.30, 0.27, 0.24) * pow(toSun, 6.0);
-          color += vec3(0.55, 0.62, 0.72) * pow(toSun, 90.0);
-          color += vec3(4.0, 3.8, 3.5) * smoothstep(0.99990, 0.99996, toSun);
+          color += vec3(0.55, 0.62, 0.72) * pow(toSun, 90.0) * (1.0 - uStorm);
+          color += vec3(4.0, 3.8, 3.5) * smoothstep(0.99990, 0.99996, toSun) * (1.0 - uStorm);
           // Night: the dust sky fades to a faint blue-grey.
           color = mix(vec3(0.012, 0.014, 0.02), color, uDay);
           gl_FragColor = vec4(color, 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
+          // Dust storm: a flat brown-orange murk with the sun reduced to a dull glow. Fog is mixed in
+          // after tone mapping, so the murk is too; only then do ground and sky meet at the horizon.
+          vec3 murk = uStormColor * (1.0 - 0.25 * smoothstep(0.15, 1.0, up) + 0.1 * pow(toSun, 4.0));
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, murk, uStorm);
         }
       `,
     });
@@ -87,6 +96,12 @@ export class Sky {
   /** 1 in full daylight, 0 at night. */
   setDaylight(day: number): void {
     this.material.uniforms.uDay.value = day;
+  }
+
+  /** @param storm 0 on a clear sol, 1 in a full dust storm. @param fog the scene fog colour the murk has to match. */
+  setStorm(storm: number, fog: THREE.Color): void {
+    this.material.uniforms.uStorm.value = storm;
+    this.material.uniforms.uStormColor.value.copy(fog).convertLinearToSRGB();
   }
 
   /** Keep the dome on the camera and the shadow box on the point of interest. */

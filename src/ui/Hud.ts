@@ -40,6 +40,10 @@ export interface Telemetry {
   /** Expected panel energy over one sol at this spot, kWh. */
   panelDayKWh: number;
   inShadow: boolean;
+  /** 0..1 of the rover battery left. */
+  battery: number;
+  /** Seconds of cabin air left for one person. */
+  cabinAirS: number;
   /** Set while the crew is sheltering inside the parked rover. */
   camping: boolean;
   /** Label of the shelter button for the current situation. */
@@ -60,17 +64,19 @@ export interface MiniMap {
 
 const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
 
+export type ViewId = 'chase' | 'first' | 'map' | 'globe';
+
 export interface HudActions {
   start(): void;
   setTraveller(mode: TravelMode): void;
   setLayer(layer: LayerId): void;
   setTraverseVisible(visible: boolean): void;
-  toggleView(): void;
-  toggleCamera(): void;
+  /** Switch between following the traveller, the helmet view, the map and the globe of all sites. */
+  setView(view: ViewId): void;
+  /** Reset the view to the traveller on the surface, from wherever the user ended up. */
+  home(): void;
   setTimeScale(scale: number): void;
   shelter(): void;
-  /** Leave the surface map for the globe of all landing sites. */
-  openGlobe(): void;
   /** A landing site chosen on the globe, by name. */
   pickSite(name: string): void;
   setHour(hour: number): void;
@@ -149,27 +155,34 @@ export class Hud {
         <div id="t-status" class="status"><b></b><span></span></div>
         <div class="meter"><div id="t-reserve"></div></div>
         <p id="t-reserve-text" class="muted small"></p>
+        <div id="t-verdict" class="status"><b></b><span></span></div>
+        <button id="shelter-button"></button>
+        <h3>Weather</h3>
+        <dl>
+          <div><dt>Air</dt><dd id="t-air"></dd></div>
+          <div><dt>Ground</dt><dd id="t-ground"></dd></div>
+          <div><dt>Wind</dt><dd id="t-wind"></dd></div>
+          <div><dt>Pressure</dt><dd id="t-pressure"></dd></div>
+        </dl>
+        <h3>Radiation</h3>
+        <dl>
+          <div><dt>Dose rate</dt><dd id="t-dose-rate"></dd></div>
+          <div><dt>Dose this trip</dt><dd id="t-dose"></dd></div>
+          <div><dt>UV index <abbr title="Estimated from the sun's height, not measured">est.</abbr></dt><dd id="t-uv"></dd></div>
+          <div id="t-space" class="space"><dt>Space weather</dt><dd></dd></div>
+        </dl>
+        <h3>Crew rover</h3>
+        <dl>
+          <div><dt>Battery <abbr title="Modelled: drive energy out, solar panel in">est.</abbr></dt><dd id="t-battery"></dd></div>
+          <div><dt>Cabin air <abbr title="Modelled life-support reserve; camping and suit refills use it, the lander refills it">est.</abbr></dt><dd id="t-cabin"></dd></div>
+          <div><dt>Solar now <abbr title="Estimated for the rover's 8 m² panels from sun height, dust and terrain shadow">est.</abbr></dt><dd id="t-solar"></dd></div>
+          <div><dt>Solar per sol <abbr title="Estimated energy the rover's panels collect here over one Mars day">est.</abbr></dt><dd id="t-solar-day"></dd></div>
+        </dl>
+        <h3>Ground</h3>
         <dl>
           <div><dt>Elevation</dt><dd id="t-elevation"></dd></div>
           <div><dt>Slope</dt><dd id="t-slope"></dd></div>
-          <div><dt>Air</dt><dd id="t-air"></dd></div>
-          <div><dt>Ground</dt><dd id="t-ground"></dd></div>
-          <div><dt>Pressure</dt><dd id="t-pressure"></dd></div>
-          <div><dt>Wind</dt><dd id="t-wind"></dd></div>
-          <div><dt>UV index <abbr title="Estimated from the sun's height, not measured">est.</abbr></dt><dd id="t-uv"></dd></div>
-          <div><dt>Radiation</dt><dd id="t-dose-rate"></dd></div>
-          <div><dt>Dose this trip</dt><dd id="t-dose"></dd></div>
-          <div><dt>Solar now <abbr title="Estimated for the rover's 4 m² panel from sun height, dust and terrain shadow">est.</abbr></dt><dd id="t-solar"></dd></div>
-          <div><dt>Solar per sol <abbr title="Estimated energy the rover's panel collects here over one Mars day">est.</abbr></dt><dd id="t-solar-day"></dd></div>
         </dl>
-        <div id="t-space" class="space"><b></b><span></span></div>
-        <div id="t-verdict" class="status"><b></b><span></span></div>
-        <button id="shelter-button"></button>
-        <div class="segmented small" id="scenario" title="Clear sol is measured weather; the storms are drills">
-          <button data-scenario="clear" class="active">Clear sol</button>
-          <button data-scenario="dust">Dust storm</button>
-          <button data-scenario="solar">Solar storm</button>
-        </div>
         <div class="clock">
           <label for="hour">Local time <b id="t-hour"></b></label>
           <input id="hour" type="range" min="0" max="23.75" step="0.25" value="10" />
@@ -197,13 +210,29 @@ export class Hud {
           <p id="near-credit" class="muted small"></p>
           <button id="near-route">Plan a route there</button>
         </div>
-        <div class="row">
-          <button id="view-button">Map view</button>
-          <button id="cam-button">Helmet view</button>
-          <button id="about-button">Sources</button>
-        </div>
-        <button id="globe-button" title="Or keep zooming out of the map">All Mars landing sites</button>
       </aside>
+
+      <nav id="topbar" class="panel" hidden>
+        <div class="bar-group">
+          <span>View</span>
+          <div class="segmented small" id="view">
+            <button data-view="chase" title="Camera behind you">Follow</button>
+            <button data-view="first" title="Through the helmet or the rover windscreen">Helmet</button>
+            <button data-view="map" title="Top-down map for planning routes">Map</button>
+            <button data-view="globe" title="The globe with every NASA landing site">All Mars</button>
+          </div>
+          <button id="home-button" title="Lost? This puts the camera back on you. Shortcut: Esc">Back to me</button>
+        </div>
+        <div class="bar-group">
+          <span title="Clear sol is measured weather; the storms are drills">Weather drill</span>
+          <div class="segmented small" id="scenario">
+            <button data-scenario="clear" class="active">Clear sol</button>
+            <button data-scenario="dust">Dust storm</button>
+            <button data-scenario="solar">Solar storm</button>
+          </div>
+        </div>
+        <button id="about-button">Sources</button>
+      </nav>
 
       <aside id="globe-panel" class="panel" hidden></aside>
 
@@ -251,15 +280,17 @@ export class Hud {
       view.hidden = false;
     });
     this.mapImage.src = `${this.photoBase}ortho.jpg`;
-    el(this.root, '#view-button').addEventListener('click', () => actions.toggleView());
-    el(this.root, '#globe-button').addEventListener('click', () => actions.openGlobe());
+    el(this.root, '#view').addEventListener('click', (event) => {
+      const view = (event.target as HTMLElement).dataset.view as ViewId | undefined;
+      if (view) actions.setView(view);
+    });
+    el(this.root, '#home-button').addEventListener('click', () => actions.home());
     el(this.root, '#globe-panel').addEventListener('click', (event) => {
       const target = event.target as HTMLElement;
       if (target.closest('[data-land]')) actions.start();
       const site = target.closest<HTMLElement>('[data-site]');
       if (site) actions.pickSite(site.dataset.site!);
     });
-    el(this.root, '#cam-button').addEventListener('click', () => actions.toggleCamera());
     el(this.root, '#about-button').addEventListener('click', () => (el(this.root, '#about').hidden = false));
     el(this.root, '#about-close').addEventListener('click', () => (el(this.root, '#about').hidden = true));
     el(this.root, '#photo').addEventListener('click', () => (el(this.root, '#photo').hidden = true));
@@ -277,7 +308,7 @@ export class Hud {
 
   /** Reveal the working panels once the traveller is on the surface. */
   showPanels(): void {
-    for (const id of ['#telemetry', '#layers', '#planner']) el(this.root, id).hidden = false;
+    for (const id of ['#telemetry', '#layers', '#planner', '#topbar']) el(this.root, id).hidden = false;
   }
 
   /** Orbit view: the surface panels give way to the list of NASA landing sites. */
@@ -286,6 +317,7 @@ export class Hud {
     const panel = el(this.root, '#globe-panel');
     const east = ((selected.lon % 360) + 360) % 360;
     panel.hidden = false;
+    this.setView('globe');
     panel.innerHTML = /* html */ `
       <header><strong>NASA landing sites</strong></header>
       <p class="hint">Drag to turn Mars. Click a site, on the globe or here.</p>
@@ -336,11 +368,14 @@ export class Hud {
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-scale]')) button.classList.toggle('active', Number(button.dataset.scale) === scale);
   }
 
-  setView(map: boolean, firstPerson: boolean): void {
-    el(this.root, '#view-button').textContent = map ? 'Ground view' : 'Map view';
-    el(this.root, '#cam-button').textContent = firstPerson ? 'Outside view' : 'Helmet view';
-    el<HTMLButtonElement>(this.root, '#cam-button').disabled = map;
-    el(this.root, '#visor').hidden = !firstPerson;
+  setView(view: ViewId): void {
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-view]')) button.classList.toggle('active', button.dataset.view === view);
+    el(this.root, '#visor').hidden = view !== 'first';
+  }
+
+  /** Close anything laid over the view: the science card, an enlarged photo, the sources sheet. */
+  closeOverlays(): void {
+    for (const id of ['#card', '#photo', '#about']) el(this.root, id).hidden = true;
   }
 
   setTelemetry(t: Telemetry): void {
@@ -367,12 +402,14 @@ export class Hud {
     if (t.camping) verdict.style.setProperty('--tone', '#6fd6ee');
     set('#t-verdict b', t.camping ? 'SHELTERED' : t.verdict);
     set('#t-verdict span', t.camping
-      ? `Camped in the rover: half the radiation, suit recharging. Outside: ${t.verdict}.`
+      ? `Camped in the rover: half the radiation, suit refilling from the cabin. Outside: ${t.verdict}.`
       : `${t.verdictReason} Sunlight ${Math.round(t.solarWm2)} W/m².`);
     set('#shelter-button', t.shelterAction);
     el(this.root, '#shelter-button').classList.toggle('primary', !t.camping && t.verdict === 'NO-GO');
     this.drawNearby(t.map);
     set('#t-uv', t.uvIndex.toFixed(0));
+    set('#t-battery', `${Math.round(Math.max(0, t.battery) * 100)} %`);
+    set('#t-cabin', `${Math.max(0, t.cabinAirS / 3600).toFixed(0)} h`);
     set('#t-solar', t.inShadow ? `${Math.round(t.panelW)} W · in shadow` : `${Math.round(t.panelW)} W`);
     set('#t-solar-day', `${t.panelDayKWh.toFixed(1)} kWh`);
     set('#t-dose-rate', `${t.doseRate.toFixed(1)} µSv/h`);
@@ -380,8 +417,7 @@ export class Hud {
     const space = el(this.root, '#t-space');
     space.dataset.status = t.spaceStatus;
     space.title = t.spaceDetail;
-    set('#t-space b', 'Space weather');
-    set('#t-space span', t.spaceHeadline);
+    set('#t-space dd', t.spaceHeadline);
     const hours = Math.floor(t.hour);
     set('#t-hour', `${String(hours).padStart(2, '0')}:${String(Math.floor((t.hour - hours) * 60)).padStart(2, '0')}`);
     const slider = el<HTMLInputElement>(this.root, '#hour');
