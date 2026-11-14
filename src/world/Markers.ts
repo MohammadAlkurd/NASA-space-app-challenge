@@ -275,6 +275,7 @@ export class Markers {
         if (material) {
           const index = this.lineMaterials.indexOf(material as LineMaterial);
           if (index >= 0) this.lineMaterials.splice(index, 1);
+          (material as THREE.SpriteMaterial).map?.dispose();
           material.dispose();
         }
       });

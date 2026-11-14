@@ -321,12 +321,13 @@ export class Router {
       reason: '',
     };
     const haveJ = reserve * budgetJ;
-    if (!rover) {
+    const within = (k: number) => usedJ[k] + contingency.homeJ[cells[k]] <= haveJ && contingency.slowS[cells[k]] <= SHELTER_WALK_S;
+    // No turn-back point on the way to a shelter, or when the start is already past the limits: the verdict says so instead.
+    if (!rover && !oneWay && within(0)) {
       // Walk the route until either rule breaks: energy to get home, or the 60 min walk to shelter.
       let along = 0;
       for (let k = 1; k < points.length; k += 1) {
-        const ok = usedJ[k] + contingency.homeJ[cells[k]] <= haveJ && contingency.slowS[cells[k]] <= SHELTER_WALK_S;
-        if (!ok) {
+        if (!within(k)) {
           trip.turnBack = points[k - 1];
           trip.turnBackM = along;
           break;

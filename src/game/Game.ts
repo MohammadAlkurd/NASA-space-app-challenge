@@ -151,7 +151,10 @@ export class Game {
         this.refreshSolarDay();
         if (this.layer === 'solar') this.setLayer('solar');
         // Dust slows travel, which changes the energy every route needs: plan the trip again for the new weather.
-        if (this.destination && this.routes.length && !this.following && this.tool === 'plan') this.planTo(this.destination);
+        if (this.following || !this.routes.length) this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
+        else if (this.tool === 'draw' && this.destination) this.compareDrawing();
+        else if (this.tool === 'draw') this.refreshDrawing();
+        else if (this.destination) this.planTo(this.destination);
         else this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
         if (scenario !== 'clear' && this.started) this.stormAlert(scenario);
       },
@@ -631,7 +634,17 @@ export class Game {
 
   /** Put the hand-drawn route next to the planner's routes to the same end point. */
   private finishDraw(): void {
-    if (this.drawPoints.length < 2) return;
+    const planned = this.compareDrawing();
+    if (planned.length) {
+      const custom = this.routes[0];
+      const safest = planned[0];
+      const worse = RATINGS.indexOf(custom.stats.worst) > RATINGS.indexOf(safest.stats.worst);
+      this.hud.toast(worse ? `Your route is rated ${custom.stats.worst}. The Safest route avoids that.` : 'Your route is as safe as the planner\'s. Nice work.');
+    }
+  }
+
+  private compareDrawing(): Route[] {
+    if (this.drawPoints.length < 2) return [];
     const context = this.tripContext();
     const custom = this.router.evaluate(this.drawPoints, this.active.profile, 'custom', 'My route', context);
     const goal = this.drawPoints[this.drawPoints.length - 1];
@@ -639,11 +652,7 @@ export class Game {
     this.destination = goal;
     this.markers.setDestination(goal);
     this.showRoutes([custom, ...planned], 0);
-    if (planned.length) {
-      const safest = planned[0];
-      const worse = RATINGS.indexOf(custom.stats.worst) > RATINGS.indexOf(safest.stats.worst);
-      this.hud.toast(worse ? `Your route is rated ${custom.stats.worst}. The Safest route avoids that.` : 'Your route is as safe as the planner\'s. Nice work.');
-    }
+    return planned;
   }
 
   /** Move the base (and the parked rover) here and start a fresh walk from it. */
