@@ -31,6 +31,8 @@ export interface SpaceWeather {
 const DEG = Math.PI / 180;
 /** Seconds in a Mars solar day. */
 export const SOL_SECONDS = 88775;
+/** One hour of the 24-hour Mars clock, in seconds. */
+export const HOUR_SECONDS = SOL_SECONDS / 24;
 
 function lerpHour(values: number[], hour: number): number {
   const h = ((hour % 24) + 24) % 24;

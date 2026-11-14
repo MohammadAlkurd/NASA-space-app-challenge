@@ -4,7 +4,7 @@ import { Input } from '../core/Input';
 import { Loop } from '../core/Loop';
 import { createRenderer } from '../core/Renderer';
 import { assess, type Conditions, type Scenario } from '../data/Conditions';
-import { Environment, SOL_SECONDS } from '../data/Environment';
+import { Environment, HOUR_SECONDS } from '../data/Environment';
 import { Astronaut } from '../entities/Astronaut';
 import type { Explorer, TravelMode } from '../entities/Explorer';
 import { Rover } from '../entities/Rover';
@@ -24,7 +24,6 @@ import { loadSite, type SiteData } from '../world/SiteData';
 import { DUST_COLOR, Sky } from '../world/Sky';
 import { Terrain } from '../world/Terrain';
 
-const HOUR_SECONDS = SOL_SECONDS / 24;
 /** Rover solar panel, modelled: 4 m2 of cells at 27 % efficiency. */
 const PANEL_W_PER_WM2 = 4 * 0.27;
 /** Close enough to the rover to climb in, metres. */

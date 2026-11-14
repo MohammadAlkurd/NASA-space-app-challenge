@@ -1,5 +1,5 @@
 import { assess, type Scenario, type Verdict } from '../data/Conditions';
-import type { Environment } from '../data/Environment';
+import { HOUR_SECONDS, type Environment } from '../data/Environment';
 
 /** What a trip meets between leaving and arriving, from the measured weather table and the sun's position. */
 export interface RouteTiming {
@@ -20,7 +20,8 @@ export interface RouteTiming {
 const STEP_H = 0.25;
 
 function sample(environment: Environment, startHour: number, durationS: number) {
-  const hours = durationS / 3600;
+  // Hours of the Mars clock, which the weather table and the mission clock both use.
+  const hours = durationS / HOUR_SECONDS;
   let minAirC = Infinity;
   let maxAirC = -Infinity;
   let minSunDeg = Infinity;
@@ -62,7 +63,7 @@ export function timeRoute(
   environment: Environment, scenario: Scenario, startHour: number, durationS: number, doseUSv: number,
 ): RouteTiming {
   const s = sample(environment, startHour, durationS);
-  const endHour = (startHour + durationS / 3600) % 24;
+  const endHour = (startHour + durationS / HOUR_SECONDS) % 24;
   const now = assess(scenario, environment.at(startHour), environment.spaceWeather);
   const warnings: string[] = [];
   let verdict: Verdict = now.verdict;
@@ -70,9 +71,9 @@ export function timeRoute(
   if (scenarioReason) warnings.push(scenarioReason);
   if (s.darkH > 0 || s.minSunDeg < 5) {
     verdict = 'NO-GO';
-    warnings.push(s.darkH * 3600 >= durationS - 1
+    warnings.push(s.darkH * HOUR_SECONDS >= durationS - 1
       ? 'The whole trip is in the dark: you cannot see rocks or slopes.'
-      : `About ${Math.max(1, Math.round(s.darkH * 60))} min of this trip is in the dark.`);
+      : `About ${Math.max(1, Math.round((s.darkH * HOUR_SECONDS) / 60))} min of this trip is in the dark.`);
   } else if (s.minSunDeg < 15) {
     if (verdict === 'GO') verdict = 'GO WITH CARE';
     warnings.push('Low sun on part of the trip: long shadows hide rocks.');
