@@ -287,7 +287,7 @@ export class Router {
     const points = cells.map((c) => analysis.cellCenter(c, { x: 0, z: 0 }));
     points[0] = { x: start.x, z: start.z };
     points[points.length - 1] = { x: goal.x, z: goal.z };
-    return smooth(points);
+    return smooth(points, (p) => analysis.effectiveSlope(analysis.index(p.x, p.z)) < profile.maxSlope);
   }
 
   /** Cost in seconds of entering a cell, weighted by what this route type cares about. */
@@ -312,17 +312,18 @@ export class Router {
   }
 }
 
-/** Round off the grid staircase without leaving the cells the planner approved. */
-function smooth(points: RoutePoint[]): RoutePoint[] {
+/** Round off the grid staircase; a point stays put if moving it would put it on no-go ground. */
+function smooth(points: RoutePoint[], passable: (point: RoutePoint) => boolean): RoutePoint[] {
   if (points.length < 4) return points;
   let current = points;
   for (let pass = 0; pass < 2; pass += 1) {
     const next = [current[0]];
     for (let k = 1; k < current.length - 1; k += 1) {
-      next.push({
+      const moved = {
         x: current[k - 1].x * 0.25 + current[k].x * 0.5 + current[k + 1].x * 0.25,
         z: current[k - 1].z * 0.25 + current[k].z * 0.5 + current[k + 1].z * 0.25,
-      });
+      };
+      next.push(passable(moved) ? moved : current[k]);
     }
     next.push(current[current.length - 1]);
     current = next;
