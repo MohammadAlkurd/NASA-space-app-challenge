@@ -1,9 +1,11 @@
 import type { TravelProfile } from '../entities/Explorer';
 import { Analysis, GRID, doseRate } from './Analysis';
+import { abortRules, checklistRows, type ChecklistRow } from './Checklist';
 import type { Contingency } from './Contingency';
 import {
-  MODEL, ROVER_BATTERY_WH, SHELTER_WALK_S, STOP_S, SUIT_ENERGY_J, WORK_RATE_W, gradeDeg, pace, travelEnergyJ,
+  MODEL, ROVER_BATTERY_WH, SHELTER_WALK_S, STOP_S, SUIT_ENERGY_J, WORK_RATE_W, gradeDeg, pace, suitSupplies, travelEnergyJ,
 } from './Models';
+import { clock } from './Timeline';
 
 export { ROVER_BATTERY_WH } from './Models';
 
@@ -44,6 +46,42 @@ export interface RouteStats {
 
 export type Feasibility = 'PASS' | 'MARGINAL' | 'FAIL';
 
+/** One line of the Marswalk checklist: what the suit and the clock should read at a point of the outing. */
+export interface Checkpoint {
+  kind: 'start' | 'way' | 'turn' | 'arrive' | 'leave' | 'home';
+  name: string;
+  /** Where on the map; null for a walk home that ends at a shelter off the planned path. */
+  point: RoutePoint | null;
+  /** Metres travelled so far; NaN when the way home leaves no-go ground out of reach. */
+  distanceM: number;
+  /** Seconds after leaving, in the weather the trip was planned for. */
+  atS: number;
+  /** Steepest ground on the leg that ends here, degrees; NaN for a walk home off the planned path. */
+  slopeDeg: number;
+  /** Share left, 0..1: suit energy on foot, battery in the rover. */
+  energy: number;
+  /** Share of the suit's oxygen and cooling water left; null in the rover, where the cabin supplies both. */
+  oxygen: number | null;
+  water: number | null;
+  doseUSv: number;
+  /** Walk from here to the nearest shelter at the suit-failure pace, seconds. */
+  shelterS: number;
+  /** Least energy share needed here to finish the plan and keep the reserve margin; null once home. */
+  goOn: number | null;
+}
+
+/** Running totals at every route point, one way. */
+export interface Track {
+  distM: number[];
+  /** Seconds since leaving, in the planned weather. */
+  atS: number[];
+  doseUSv: number[];
+  usedJ: number[];
+  slopeDeg: number[];
+  /** Share of suit energy or battery left; filled in by the trip check. */
+  left: number[];
+}
+
 export interface Trip {
   /** True when the route ends at a shelter, so nothing has to be kept for a way back. */
   oneWay: boolean;
@@ -52,6 +90,10 @@ export interface Trip {
   /** Same unit as `RouteStats.resource`, for the whole outing. */
   resource: number;
   doseUSv: number;
+  /** Seconds spent at the destination, and the dose collected there; 0 on a one-way trip. */
+  stopS: number;
+  stopDoseUSv: number;
+  checkpoints: Checkpoint[];
   /** Longest walk to a pressurised shelter from any point of the route, seconds at the emergency pace. */
   shelterS: number;
   /** Last point from which turning around still meets the walk-back rules; null when the whole route does. */
@@ -82,6 +124,7 @@ export interface Route {
   ratings: Rating[];
   segments: Segment[];
   stats: RouteStats;
+  track: Track;
   stops: string[];
 }
 
@@ -226,13 +269,12 @@ export class Router {
     const stats: RouteStats = {
       distanceM: 0, durationS: 0, ascentM: 0, descentM: 0, maxSlopeDeg: 0, doseUSv: 0, resource: 0,
       worst: 'SAFE', noGoM: 0, cautionM: 0,
-      trip: { oneWay: false, totalS: 0, resource: 0, doseUSv: 0, shelterS: 0, turnBack: null, turnBackM: 0, verdict: 'PASS', reason: '' },
+      trip: { oneWay: false, totalS: 0, resource: 0, doseUSv: 0, stopS: 0, stopDoseUSv: 0, checkpoints: [], shelterS: 0, turnBack: null, turnBackM: 0, verdict: 'PASS', reason: '' },
     };
     const mover = profile.mode;
     // The same path walked the other way: slopes reverse, so time and energy differ.
     const back = { s: 0, j: 0, dose: 0 };
-    /** Energy spent on reaching each point, joules. */
-    const usedJ = [0];
+    const track: Track = { distM: [0], atS: [0], doseUSv: [0], usedJ: [0], slopeDeg: [0], left: [] };
     const ratings: Rating[] = [];
     const segments: Segment[] = [];
     let energyJ = 0;
@@ -259,7 +301,11 @@ export class Router {
       stats.maxSlopeDeg = Math.max(stats.maxSlopeDeg, slope);
       stats.doseUSv += (doseRate(analysis.skyView[cell]) * time) / 3600;
       energyJ += travelEnergyJ(mover, length, grade, speed * context.speedFactor);
-      usedJ.push(energyJ);
+      track.distM.push(stats.distanceM);
+      track.atS.push(stats.durationS / context.speedFactor);
+      track.doseUSv.push(stats.doseUSv / context.speedFactor);
+      track.usedJ.push(energyJ);
+      track.slopeDeg.push(slope);
       if (rating === 'NO-GO') stats.noGoM += length;
       if (rating !== 'SAFE') stats.cautionM += length;
       if (RATINGS.indexOf(rating) > RATINGS.indexOf(stats.worst)) stats.worst = rating;
@@ -276,14 +322,14 @@ export class Router {
     }
     ratings.push(ratings[ratings.length - 1] ?? 'SAFE');
     stats.resource = mover === 'rover' ? energyJ / 3600 : energyJ / SUIT_ENERGY_J;
-    stats.trip = this.trip(points, profile, stats, back, usedJ, context);
-    return { kind, label, points, ratings, segments, stats, stops: [] };
+    stats.trip = this.trip(points, profile, stats, back, track, context);
+    return { kind, label, points, ratings, segments, stats, track, stops: [] };
   }
 
   /** The whole outing checked against the hard limits: energy to get back, and the walk to shelter. */
   private trip(
     points: RoutePoint[], profile: TravelProfile, out: RouteStats, back: { s: number; j: number; dose: number },
-    usedJ: number[], context: TripContext,
+    track: Track, context: TripContext,
   ): Trip {
     const analysis = this.analysis;
     const { contingency, shelters, reserve } = context;
@@ -294,6 +340,7 @@ export class Router {
     const cells = points.map((p) => analysis.index(p.x, p.z));
     const endCell = cells[cells.length - 1];
     const oneWay = near(points[points.length - 1]);
+    const { usedJ } = track;
     const outJ = usedJ[usedJ.length - 1];
     let shelterS = 0;
     let farJ = 0;
@@ -302,18 +349,25 @@ export class Router {
       farJ = Math.max(farJ, contingency.homeJ[cell]);
     }
     // The way back: the same path when it started at a shelter (or by rover), else the walk to the nearest shelter.
-    const home = rover || near(points[0])
-      ? back
-      : { s: contingency.planS[endCell], j: contingency.planJ[endCell], dose: (doseRate(analysis.skyView[endCell]) * contingency.planS[endCell]) / 3600 };
+    const samePath = rover || near(points[0]);
+    const home = samePath
+      ? { ...back, m: out.distanceM }
+      : { s: contingency.planS[endCell], j: contingency.planJ[endCell], dose: (doseRate(analysis.skyView[endCell]) * contingency.planS[endCell]) / 3600, m: contingency.planM[endCell] };
     // Cut off from shelter: the trip fails below; keep the totals finite for the clock and the card.
     const reachable = Number.isFinite(home.s);
-    const stopJ = rover ? 0 : WORK_RATE_W * STOP_S;
+    const stopJ = (rover ? MODEL.roverElectronics.value : WORK_RATE_W) * STOP_S;
     const needJ = oneWay ? outJ : outJ + stopJ + home.j;
+    const round = !oneWay && reachable;
+    const stopS = round ? STOP_S : 0;
+    const stopDoseUSv = (doseRate(analysis.skyView[endCell]) * stopS) / 3600;
     const trip: Trip = {
       oneWay,
-      totalS: oneWay || !reachable ? out.durationS : out.durationS + STOP_S + home.s,
+      totalS: round ? out.durationS + stopS + home.s : out.durationS,
       resource: unit(reachable ? needJ : outJ),
-      doseUSv: oneWay || !reachable ? out.doseUSv : out.doseUSv + (doseRate(analysis.skyView[endCell]) * STOP_S) / 3600 + home.dose,
+      doseUSv: round ? out.doseUSv + stopDoseUSv + home.dose : out.doseUSv,
+      stopS,
+      stopDoseUSv,
+      checkpoints: [],
       shelterS,
       turnBack: null,
       turnBackM: 0,
@@ -323,17 +377,69 @@ export class Router {
     const haveJ = reserve * budgetJ;
     const within = (k: number) => usedJ[k] + contingency.homeJ[cells[k]] <= haveJ && contingency.slowS[cells[k]] <= SHELTER_WALK_S;
     // No turn-back point on the way to a shelter, or when the start is already past the limits: the verdict says so instead.
+    let turnIndex = -1;
     if (!rover && !oneWay && within(0)) {
       // Walk the route until either rule breaks: energy to get home, or the 60 min walk to shelter.
-      let along = 0;
       for (let k = 1; k < points.length; k += 1) {
         if (!within(k)) {
-          trip.turnBack = points[k - 1];
-          trip.turnBackM = along;
+          turnIndex = k - 1;
+          trip.turnBack = points[turnIndex];
+          trip.turnBackM = track.distM[turnIndex];
           break;
         }
-        along += Math.hypot(points[k].x - points[k - 1].x, points[k].z - points[k - 1].z);
       }
+    }
+    track.left = usedJ.map((j) => reserve - j / budgetJ);
+    // Checklist lines: a checkpoint about every 500 m on foot (2 km by rover), five legs at most, plus the turn-back point.
+    const last = points.length - 1;
+    const legs = Math.min(5, Math.max(1, Math.ceil(out.distanceM / (rover ? 2000 : 500))));
+    const stops = new Set<number>();
+    for (let k = 1, next = 1; k < last && next < legs; k += 1) {
+      if (track.distM[k] >= (next * out.distanceM) / legs) {
+        stops.add(k);
+        next += 1;
+      }
+    }
+    if (turnIndex > 0) stops.add(turnIndex);
+    const slow = 1 / context.speedFactor;
+    const line = (kind: Checkpoint['kind'], name: string, k: number, more = { s: 0, j: 0, dose: 0, m: 0 }, slopeDeg = 0): Checkpoint => {
+      const spentJ = usedJ[k] + more.j;
+      const suit = suitSupplies((1 - reserve) * SUIT_ENERGY_J + spentJ);
+      return {
+        kind, name, slopeDeg,
+        point: kind !== 'home' || oneWay ? points[k] : samePath ? points[0] : null,
+        distanceM: track.distM[k] + more.m,
+        atS: track.atS[k] + more.s,
+        energy: reserve - spentJ / budgetJ,
+        oxygen: rover ? null : suit.oxygen,
+        water: rover ? null : suit.water,
+        doseUSv: track.doseUSv[k] + more.dose,
+        shelterS: kind === 'home' ? 0 : contingency.slowS[cells[k]],
+        goOn: kind === 'home' || !reachable ? null : Math.max(0, (needJ - spentJ) / budgetJ) + MODEL.marginal.value / 100,
+      };
+    };
+    const steepest = (from: number, to: number) => {
+      let slope = 0;
+      for (let k = from + 1; k <= to; k += 1) slope = Math.max(slope, track.slopeDeg[k]);
+      return slope;
+    };
+    trip.checkpoints.push(line('start', 'Start', 0));
+    let before = 0;
+    let number = 0;
+    for (const k of [...stops].sort((a, b) => a - b)) {
+      if (k === turnIndex) trip.checkpoints.push(line('turn', 'Turn-back point', k, undefined, steepest(before, k)));
+      else trip.checkpoints.push(line('way', `Checkpoint ${number += 1}`, k, undefined, steepest(before, k)));
+      before = k;
+    }
+    trip.checkpoints.push(line(oneWay ? 'home' : 'arrive', oneWay ? 'Shelter' : 'Destination', last, undefined, steepest(before, last)));
+    if (round) {
+      const stay = { s: stopS, j: stopJ, dose: stopDoseUSv, m: 0 };
+      trip.checkpoints.push(line('leave', 'Leave destination', last, stay));
+      trip.checkpoints.push(line(
+        'home', rover ? 'Back at the start' : 'Back at shelter', last,
+        { s: stopS + home.s * slow, j: stopJ + home.j, dose: stopDoseUSv + home.dose * slow, m: home.m },
+        samePath ? out.maxSlopeDeg : NaN,
+      ));
     }
     const leftShare = Math.round(((haveJ - needJ) / budgetJ) * 100);
     const what = rover ? 'battery' : 'suit energy';
@@ -468,10 +574,27 @@ export function formatDuration(seconds: number): string {
   return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min` : `${minutes} min`;
 }
 
-export function toGeoJSON(route: Route, toLatLon: (x: number, z: number) => { lat: number; lon: number }, elevation: (x: number, z: number) => number, traveller: string): string {
-  const coordinates = route.points.map((p) => {
+type LatLon = (x: number, z: number) => { lat: number; lon: number };
+type Elevation = (x: number, z: number) => number;
+
+export function toGeoJSON(route: Route, toLatLon: LatLon, elevation: Elevation, traveller: string, startHour = 0, doseFactor = 1): string {
+  const position = (p: RoutePoint) => {
     const { lat, lon } = toLatLon(p.x, p.z);
     return [Number(lon.toFixed(6)), Number(lat.toFixed(6)), Number(elevation(p.x, p.z).toFixed(1))];
+  };
+  const rows = checklistRows(route, startHour, doseFactor);
+  const end = rows[rows.length - 1];
+  const checkpoints = rows.flatMap((row, k) => {
+    const point = route.stats.trip.checkpoints[k].point;
+    return point ? [{
+      type: 'Feature',
+      properties: {
+        checkpoint: row.name, clock: row.clock, elapsed_min: row.elapsedMin, distance_m: row.distanceM, steepest_slope_deg: row.slopeDeg,
+        energy_left_pct: row.energyPct, oxygen_left_pct: row.oxygenPct, cooling_water_left_pct: row.waterPct,
+        dose_uSv: row.doseUSv, shelter_walk_min: row.shelterMin, go_on_only_above_energy_pct: row.goOnPct,
+      },
+      geometry: { type: 'Point', coordinates: position(point) },
+    }] : [];
   });
   return JSON.stringify({
     type: 'FeatureCollection',
@@ -483,19 +606,50 @@ export function toGeoJSON(route: Route, toLatLon: (x: number, z: number) => { la
         distance_m: Math.round(route.stats.distanceM), duration_min: Math.round(route.stats.durationS / 60),
         ascent_m: Math.round(route.stats.ascentM), max_slope_deg: Number(route.stats.maxSlopeDeg.toFixed(1)),
         dose_uSv: Number(route.stats.doseUSv.toFixed(2)), worst_rating: route.stats.worst, science_stops: route.stops,
-        whole_trip_min: Math.round(route.stats.trip.totalS / 60), whole_trip_dose_uSv: Number(route.stats.trip.doseUSv.toFixed(2)),
+        whole_trip_min: end.elapsedMin, whole_trip_dose_uSv: end.doseUSv,
         whole_trip_check: route.stats.trip.verdict, whole_trip_reason: route.stats.trip.reason,
+        leave_clock: rows[0].clock, back_clock: end.clock,
+        energy_left_at_end_pct: end.energyPct, oxygen_left_at_end_pct: end.oxygenPct, cooling_water_left_at_end_pct: end.waterPct,
+        turn_back_by_m: route.stats.trip.turnBack ? Math.round(route.stats.trip.turnBackM) : null,
+        abort_rules: abortRules(route, rows),
       },
-      geometry: { type: 'LineString', coordinates },
-    }],
+      geometry: { type: 'LineString', coordinates: route.points.map(position) },
+    }, ...checkpoints],
   }, null, 1);
 }
 
-export function toCSV(route: Route, toLatLon: (x: number, z: number) => { lat: number; lon: number }, elevation: (x: number, z: number) => number): string {
-  const rows = ['point,lat_deg,lon_deg_east,elevation_m,rating'];
+/** One row per route point on the way out, then the checklist lines for leaving the stop and getting home. */
+export function toCSV(route: Route, toLatLon: LatLon, elevation: Elevation, startHour = 0, doseFactor = 1): string {
+  const { track, stats } = route;
+  const rows = checklistRows(route, startHour, doseFactor);
+  // Lines that sit on the way out; leaving the stop and getting home are added after the track.
+  const named = new Map<RoutePoint, ChecklistRow>();
+  stats.trip.checkpoints.forEach((c, k) => {
+    const after = c.kind === 'leave' || (c.kind === 'home' && !stats.trip.oneWay);
+    if (c.point && !after && !named.has(c.point)) named.set(c.point, rows[k]);
+  });
+  const rover = rows[0].oxygenPct === null;
+  const out = ['point,lat_deg,lon_deg_east,elevation_m,rating,checkpoint,clock,distance_m,energy_left_pct,oxygen_left_pct,cooling_water_left_pct,dose_uSv,shelter_walk_min,go_on_only_above_energy_pct'];
+  const share = (value: number) => Math.round(Math.max(0, value) * 100);
   route.points.forEach((p, k) => {
     const { lat, lon } = toLatLon(p.x, p.z);
-    rows.push(`${k},${lat.toFixed(6)},${lon.toFixed(6)},${elevation(p.x, p.z).toFixed(1)},${route.ratings[k]}`);
+    const suit = suitSupplies((1 - track.left[k]) * SUIT_ENERGY_J);
+    const on = named.get(p);
+    out.push([
+      k, lat.toFixed(6), lon.toFixed(6), elevation(p.x, p.z).toFixed(1), route.ratings[k], on?.name ?? '',
+      clock(startHour + track.atS[k] / 3600), Math.round(track.distM[k]), share(track.left[k]),
+      rover ? '' : share(suit.oxygen), rover ? '' : share(suit.water), (track.doseUSv[k] * doseFactor).toFixed(1),
+      on?.shelterMin ?? '', on?.goOnPct ?? '',
+    ].join(','));
   });
-  return rows.join('\n');
+  rows.forEach((row, k) => {
+    if (stats.trip.oneWay || (row.kind !== 'leave' && row.kind !== 'home')) return;
+    const p = stats.trip.checkpoints[k].point;
+    const where = p ? toLatLon(p.x, p.z) : null;
+    out.push([
+      '', where?.lat.toFixed(6) ?? '', where?.lon.toFixed(6) ?? '', p ? elevation(p.x, p.z).toFixed(1) : '', '', row.name,
+      row.clock, row.distanceM ?? '', row.energyPct, row.oxygenPct ?? '', row.waterPct ?? '', row.doseUSv, row.shelterMin ?? '', row.goOnPct ?? '',
+    ].join(','));
+  });
+  return out.join('\n');
 }

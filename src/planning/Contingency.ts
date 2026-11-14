@@ -22,6 +22,8 @@ export class Contingency {
   /** The same walk at the planned (unhurried) pace: clear-sol seconds, and joules at the pace the weather allows. */
   readonly planS = new Float32Array(GRID * GRID);
   readonly planJ = new Float32Array(GRID * GRID);
+  /** Length of that walk, metres. */
+  readonly planM = new Float32Array(GRID * GRID);
   private key = '';
 
   constructor(private readonly analysis: Analysis) {}
@@ -33,7 +35,7 @@ export class Contingency {
     const key = `${sources.join(',')}|${speedFactor}`;
     if (key === this.key) return false;
     this.key = key;
-    const { homeS, homeJ, slowS, planS, planJ } = this;
+    const { homeS, homeJ, slowS, planS, planJ, planM } = this;
     const planned = MODEL.walkPlanSpeed.value;
     const limit = PROFILES.astronaut.maxSlope;
     homeS.fill(Infinity);
@@ -41,6 +43,7 @@ export class Contingency {
     slowS.fill(Infinity);
     planS.fill(Infinity);
     planJ.fill(Infinity);
+    planM.fill(Infinity);
     // Binary heap of cell indices ordered by walk time.
     const heap: number[] = [];
     const push = (cell: number) => {
@@ -77,6 +80,7 @@ export class Contingency {
       slowS[source] = 0;
       planS[source] = 0;
       planJ[source] = 0;
+      planM[source] = 0;
       push(source);
     }
     while (heap.length) {
@@ -103,6 +107,7 @@ export class Contingency {
           const unhurried = Math.min(speed, planned);
           planS[next] = planS[current] + length / unhurried;
           planJ[next] = planJ[current] + walkEnergyJ(length, grade, unhurried * speedFactor);
+          planM[next] = planM[current] + length;
           push(next);
         }
       }

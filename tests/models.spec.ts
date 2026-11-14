@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
-  MARS_G, MODEL, SUIT_ENERGY_J, marquezSpeed, pace, roverEnergyJ, walkEnergyJ,
+  MARS_G, MODEL, SUIT_ENERGY_J, marquezSpeed, pace, roverEnergyJ, suitSupplies, walkEnergyJ,
 } from '../src/planning/Models';
 
 // Checks of the planning formulas against the published numbers they come from. No browser needed.
@@ -61,6 +61,21 @@ test.describe('planning models', () => {
     // Walk-back test: 2374 BTU/h (2505 kJ/h) used 0.40 lb/h of oxygen.
     const lbPerHour = (2505 * MODEL.oxygen.value) / 453.6;
     expect(Math.abs(lbPerHour - 0.4) / 0.4).toBeLessThan(0.05);
+  });
+
+  test('oxygen and cooling water drain with effort and outlast the suit energy budget', () => {
+    expect(suitSupplies(0)).toEqual({ energy: 1, oxygen: 1, water: 1 });
+    const spent = suitSupplies(SUIT_ENERGY_J);
+    expect(spent.energy).toBeCloseTo(0, 6);
+    // Apollo 15-17 planned 8 h on one fill, so neither tank may run dry before the energy budget does.
+    expect(spent.oxygen).toBeGreaterThan(0);
+    expect(spent.oxygen).toBeLessThan(0.3);
+    expect(spent.water).toBeGreaterThan(0);
+    expect(spent.water).toBeLessThan(0.3);
+    // Oxygen charge scaled by pressure from the measured 472 g at 1020 psia.
+    expect(MODEL.oxygenTank.value).toBeCloseTo((472 * 1410) / 1020, 0);
+    // 11.5 lb of cooling water.
+    expect(MODEL.waterTank.value / 453.6).toBeCloseTo(11.5, 1);
   });
 
   test('a dust-slowed trip costs more energy over the same ground', () => {

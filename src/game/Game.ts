@@ -580,7 +580,11 @@ export class Game {
   private timings() {
     // Dust slows travel, so the trip takes longer and collects more dose than on a clear sol.
     const slow = 1 / (this.conditions?.speedFactor ?? 1);
-    return this.routes.map((route) => timeRoute(this.environment, this.scenario, this.hour, route.stats.trip.totalS * slow, route.stats.trip.doseUSv * slow));
+    // The time at the stop does not stretch with the weather.
+    return this.routes.map(({ stats: { trip } }) => timeRoute(
+      this.environment, this.scenario, this.hour,
+      (trip.totalS - trip.stopS) * slow + trip.stopS, (trip.doseUSv - trip.stopDoseUSv) * slow + trip.stopDoseUSv,
+    ));
   }
 
   private frameAround(point: RoutePoint, radius: number): void {
@@ -694,7 +698,10 @@ export class Game {
     if (!route) return;
     const toLatLon = (x: number, z: number) => this.site.toLatLon(x, z);
     const elevation = (x: number, z: number) => this.site.elevationAt(x, z);
-    const text = format === 'geojson' ? toGeoJSON(route, toLatLon, elevation, this.active.profile.label) : toCSV(route, toLatLon, elevation);
+    const storm = this.conditions?.doseFactor ?? 1;
+    const text = format === 'geojson'
+      ? toGeoJSON(route, toLatLon, elevation, this.active.profile.label, this.hour, storm)
+      : toCSV(route, toLatLon, elevation, this.hour, storm);
     const blob = new Blob([text], { type: format === 'geojson' ? 'application/geo+json' : 'text/csv' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);

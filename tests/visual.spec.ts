@@ -73,6 +73,38 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   expect(trip.verdict).toBe('PASS');
   await expect(page.locator('#trip-check')).toContainText('PASS');
 
+  // The checklist lists every leg with the supplies left, and the abort rules in plain words.
+  await expect(page.locator('#planner .route').first()).toContainText(/oxygen \d+ % · water \d+ % left/);
+  await page.locator('[data-action="checklist"]').click();
+  const legs = page.locator('#checklist table.legs tbody tr');
+  await expect(legs.first()).toContainText('Start');
+  await expect(legs.last()).toContainText('Back at shelter');
+  const cells = await legs.evaluateAll((rows) => rows.map((row) => [...row.querySelectorAll('td')].map((td) => td.textContent ?? '')));
+  expect(cells.length).toBeGreaterThanOrEqual(5);
+  const oxygen = cells.map((row) => Number.parseInt(row[5], 10));
+  const water = cells.map((row) => Number.parseInt(row[6], 10));
+  expect(oxygen[0]).toBe(100);
+  for (let k = 1; k < cells.length; k += 1) {
+    expect(oxygen[k]).toBeLessThanOrEqual(oxygen[k - 1]);
+    expect(water[k]).toBeLessThanOrEqual(water[k - 1]);
+  }
+  expect(oxygen.at(-1)!).toBeLessThan(100);
+  expect(oxygen.at(-1)!).toBeGreaterThan(40);
+  await expect(page.locator('#checklist .rules li').first()).toContainText(/If suit energy is below \d+ % at Checkpoint 1/);
+  await page.locator('#checklist [data-sheet="close"]').last().click();
+  await expect(page.locator('#checklist')).toBeHidden();
+
+  // The saved files carry the same checkpoints.
+  const [geo] = await Promise.all([page.waitForEvent('download'), page.locator('[data-action="geojson"]').click()]);
+  const saved = JSON.parse((await (await geo.createReadStream()).toArray()).join(''));
+  expect(saved.features[0].properties.abort_rules.length).toBeGreaterThanOrEqual(3);
+  expect(saved.features[0].properties.oxygen_left_at_end_pct).toBe(oxygen.at(-1));
+  expect(saved.features.filter((f: { geometry: { type: string } }) => f.geometry.type === 'Point').length).toBe(cells.length);
+  const [csv] = await Promise.all([page.waitForEvent('download'), page.locator('[data-action="csv"]').click()]);
+  const lines = (await (await csv.createReadStream()).toArray()).join('').split('\n');
+  expect(lines[0]).toContain('oxygen_left_pct');
+  expect(lines.at(-1)).toContain('Back at shelter');
+
   // Boarding the rover keeps the planned trip and re-plans it for the rover.
   await page.evaluate(() => (window.__MARS__ as Mars).setTraveller('rover'));
   await page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__!.traveller === 'rover', null, { timeout: 60_000 });

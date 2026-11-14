@@ -28,6 +28,8 @@ export const MODEL = {
   heatLimit: c(2090, 'kJ/h', 'ANALOG', 'Highest effort the cooling garment sustained (500 kcal/h)', SP368),
   oxygen: c(0.072, 'g/kJ', 'ANALOG', 'Oxygen used per unit of effort', `0.4 lb/h at 2374 BTU/h: ${WALKBACK}`),
   coolingWater: c(0.56, 'g/kJ', 'ANALOG', 'Cooling water used per unit of effort', `3.1 lb/h at 2374 BTU/h: ${WALKBACK}`),
+  oxygenTank: c(652, 'g', 'ANALOG', 'Usable oxygen in one suit backpack', 'Apollo backpack: 472 g usable at 1020 psia, scaled to the Apollo 15-17 charge of 1410 psia (the scaling is ours): NASA TN D-8093 (NTRS 19760003073)'),
+  waterTank: c(5200, 'g', 'ANALOG', 'Cooling water in one suit backpack (11.5 lb)', 'Apollo 15-17 backpack with its auxiliary tank: Apollo Lunar Surface Journal, PLSS page'),
   stopTime: c(30, 'min', 'ASSUMPTION', 'Time spent at the destination before heading back', 'Ours, adjustable'),
   marginal: c(20, '%', 'ASSUMPTION', 'A trip that leaves less than this is rated MARGINAL', 'Ours'),
   shelterWalk: c(60, 'min', 'ANALOG', 'Longest walk to a pressurised shelter if the suit CO₂ scrubber fails', 'NASA tested a 1 h, 2.0 km walk-back at 2.1 km/h or faster: Keller et al. 2024 (NTRS 20240013261)'),
@@ -37,7 +39,7 @@ export const MODEL = {
   roverLevel: c(0.216, 'J/(kg·m)', 'ANALOG', 'Rover drive energy on level ground in lunar gravity', `Carr 2001, ${SEXTANT}; scaled by Mars/Moon gravity (ASSUMPTION)`),
   roverUphill: c(0.02628, 'J/(kg·m·deg)', 'ANALOG', 'Extra rover drive energy per degree uphill, lunar gravity', `Carr 2001, ${SEXTANT}`),
   roverDownhill: c(0.007884, 'J/(kg·m·deg)', 'ANALOG', 'Extra rover drive energy per degree downhill, lunar gravity', `Carr 2001, ${SEXTANT}`),
-  roverElectronics: c(1500, 'W', 'ANALOG', 'Rover electronics power, counted while driving', `SEXTANT default, ${SEXTANT}`),
+  roverElectronics: c(1500, 'W', 'ANALOG', 'Rover electronics power, counted while driving and during the stop', `SEXTANT default, ${SEXTANT}`),
   roverBattery: c(30, 'kWh', 'ASSUMPTION', 'Crew rover battery', 'Ours, adjustable'),
   stormDose: c(3, '×', 'MEASURED', 'Dose rate in a solar particle storm, relative to normal (measured 2 to 3; the planner uses 3)', 'Curiosity RAD, September 2017: Zeitlin et al. 2018, doi:10.1029/2018GL077760'),
   stormPeak: c(12, 'h', 'MEASURED', 'How long that storm stayed at its peak, after rising for several hours', 'Zeitlin et al. 2018'),
@@ -53,6 +55,22 @@ export const STOP_S = MODEL.stopTime.value * 60;
 export const SUIT_WORK_S = SUIT_ENERGY_J / WORK_RATE_W;
 export const SHELTER_WALK_S = MODEL.shelterWalk.value * 60;
 export const SHELTER_PACE = MODEL.shelterPace.value / 3.6;
+
+export interface Supplies {
+  energy: number;
+  oxygen: number;
+  water: number;
+}
+
+/** Share of each suit supply left after `usedJ` joules of effort since the last refill. Below zero: it ran out. */
+export function suitSupplies(usedJ: number): Supplies {
+  const kJ = usedJ / 1000;
+  return {
+    energy: 1 - usedJ / SUIT_ENERGY_J,
+    oxygen: 1 - (kJ * MODEL.oxygen.value) / MODEL.oxygenTank.value,
+    water: 1 - (kJ * MODEL.coolingWater.value) / MODEL.waterTank.value,
+  };
+}
 
 export type Mover = 'rover' | 'astronaut';
 

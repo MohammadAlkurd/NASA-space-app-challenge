@@ -204,3 +204,21 @@ input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; heigh
 
 button.link { min-height: 0; padding: 0 0 1px; border: 0; border-bottom: 1px solid var(--science); color: var(--science); text-transform: none; letter-spacing: 0; font-size: 14px; }
 .warnings.timing { padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+
+.about-card table.legs { font-family: var(--font-data); font-size: 13px; }
+.about-card table.legs td, .about-card table.legs th { white-space: nowrap; }
+.about-card table.legs td:first-child { width: auto; font-family: var(--font-label); font-size: 15px; color: inherit; }
+.about-card table.legs tr.turn td { color: #ffd23f; }
+.about-card .rules { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.verdict { letter-spacing: 0.08em; margin-right: 6px; }
+.verdict.pass { color: #3ddc84; }
+.verdict.marginal { color: #ffd23f; }
+.verdict.fail { color: #ff3b3b; }
+#checklist .about-card { max-width: 1040px; overflow-x: auto; }
+@media print {
+  #app > :not(#ui), #ui > :not(#checklist) { display: none !important; }
+  #checklist { position: static; background: none; }
+  #checklist .about-card { max-height: none; overflow: visible; border: 0; background: #fff; color: #000; }
+  #checklist .about-card * { color: #000 !important; }
+  #checklist button { display: none; }
+}

@@ -12,6 +12,8 @@ export interface RouteTiming {
   minSunDeg: number;
   /** Dose scaled for the active conditions (a solar storm raises it), µSv. */
   doseUSv: number;
+  /** Storm multiplier on the dose rate in the active conditions. */
+  doseFactor: number;
   verdict: Verdict;
   /** Worst first. */
   warnings: string[];
@@ -100,6 +102,7 @@ export function timeRoute(
   return {
     startHour, endHour, durationS, minAirC: s.minAirC, maxAirC: s.maxAirC, minSunDeg: s.minSunDeg,
     doseUSv: doseUSv * now.doseFactor,
+    doseFactor: now.doseFactor,
     verdict, warnings,
     betterStart: apart > 0.5 && warnings.length > (scenarioReason ? 1 : 0) ? best : null,
   };

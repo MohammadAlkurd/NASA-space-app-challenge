@@ -2,6 +2,7 @@ import { clock, type RouteTiming } from '../planning/Timeline';
 import type { TravelMode } from '../entities/Explorer';
 import type { LayerId } from '../planning/Analysis';
 import type { BaseScore } from '../planning/BaseSite';
+import { abortRules, checklistRows } from '../planning/Checklist';
 import { ROVER_BATTERY_WH, formatDuration, type Rating, type Route } from '../planning/Router';
 import { SITES, type GlobeSite } from '../world/Globe';
 import { RATING_COLORS, type Stop } from '../world/Markers';
@@ -257,6 +258,12 @@ export class Hud {
           ${ABOUT_HTML}
         </div>
       </section>
+      <section id="checklist" class="overlay" hidden>
+        <div class="about-card">
+          <button class="close" data-sheet="close" aria-label="Close">×</button>
+          <div id="checklist-body"></div>
+        </div>
+      </section>
       <section id="photo" class="overlay" hidden><img alt="" /><p></p></section>
     `;
 
@@ -317,6 +324,11 @@ export class Hud {
     });
 
     el(this.root, '#planner').addEventListener('click', (event) => this.onPlannerClick(event));
+    el(this.root, '#checklist').addEventListener('click', (event) => {
+      const sheet = (event.target as HTMLElement).closest<HTMLElement>('[data-sheet]')?.dataset.sheet;
+      if (sheet === 'print') window.print();
+      else if (sheet === 'close' || event.target === event.currentTarget) el(this.root, '#checklist').hidden = true;
+    });
     this.renderPlanner();
   }
 
@@ -389,7 +401,7 @@ export class Hud {
 
   /** Close anything laid over the view: the science card, an enlarged photo, the sources sheet. */
   closeOverlays(): void {
-    for (const id of ['#card', '#photo', '#about']) el(this.root, id).hidden = true;
+    for (const id of ['#card', '#photo', '#about', '#checklist']) el(this.root, id).hidden = true;
   }
 
   setTelemetry(t: Telemetry): void {
@@ -644,6 +656,7 @@ export class Hud {
         <span>${formatDuration(durationS)} · ${(r.stats.distanceM / 1000).toFixed(2)} km</span>
         <span>${whole}</span>
         <span>${resource} · ${(this.timings[index]?.doseUSv ?? trip.doseUSv).toFixed(1)} µSv</span>
+        ${supplies(r)}
         <span>max slope ${r.stats.maxSlopeDeg.toFixed(0)}° · climb ${r.stats.ascentM.toFixed(0)} m</span>
         ${r.stops.length ? `<span class="science">via ${r.stops.map(escapeHtml).join(', ')}</span>` : ''}
       </button>`;
@@ -671,10 +684,46 @@ export class Hud {
       <div class="row">
         ${this.following ? '<button data-action="stop" class="primary">Stop</button>' : '<button data-action="go" class="primary">Go</button>'}
         ${drawing ? '<button data-action="undo">Undo point</button><button data-action="finish">Compare with safe routes</button>' : ''}
+        <button data-action="checklist">Checklist</button>
         <button data-action="geojson">Save GeoJSON</button>
         <button data-action="csv">Save CSV</button>
         <button data-action="clear">Clear</button>
       </div>`;
+    if (!el(this.root, '#checklist').hidden) this.renderChecklist();
+  }
+
+  /** The selected route as a leg table with the abort rules, for reading before the walk and for printing. */
+  private renderChecklist(): void {
+    const sheet = el(this.root, '#checklist');
+    const route = this.routes[this.selected];
+    if (!route) {
+      sheet.hidden = true;
+      return;
+    }
+    const timing = this.timings[this.selected];
+    const rows = checklistRows(route, timing?.startHour ?? 0, timing?.doseFactor ?? 1);
+    const rover = this.traveller === 'rover';
+    const trip = route.stats.trip;
+    const cell = (value: number | null, unit = '') => (value === null ? '—' : `${value}${unit}`);
+    const body = rows.map((row) => `<tr${row.kind === 'turn' ? ' class="turn"' : ''}>
+        <td>${escapeHtml(row.name)}</td><td>${row.clock}</td>
+        <td>${row.distanceM === null ? '—' : (row.distanceM / 1000).toFixed(2)}</td><td>${cell(row.slopeDeg, '°')}</td>
+        <td>${row.energyPct} %</td>${rover ? '' : `<td>${cell(row.oxygenPct, ' %')}</td><td>${cell(row.waterPct, ' %')}</td>`}
+        <td>${row.doseUSv.toFixed(1)}</td><td>${cell(row.shelterMin, ' min')}</td><td>${cell(row.goOnPct, ' %')}</td>
+      </tr>`).join('');
+    el(sheet, '#checklist-body').innerHTML = `
+      <h2>${escapeHtml(route.label)} route · ${rover ? 'crew rover' : 'on foot'}</h2>
+      <p><b class="verdict ${trip.verdict.toLowerCase()}">${trip.verdict}</b> ${escapeHtml(trip.reason)}</p>
+      <table class="legs">
+        <thead><tr><th>Checkpoint</th><th>Clock</th><th>km</th><th>Steepest</th><th>${rover ? 'Battery' : 'Suit energy'}</th>
+          ${rover ? '' : '<th>Oxygen</th><th>Cooling water</th>'}<th>Dose µSv</th><th>${rover ? 'Walk to shelter' : 'Shelter walk'}</th><th>Go on only above</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+      <h2>Abort rules</h2>
+      <ul class="rules">${abortRules(route, rows).map((rule) => `<li>${escapeHtml(rule)}</li>`).join('')}</ul>
+      <p class="hint">Percentages are what is left. ${rover ? '' : 'Oxygen and cooling water follow effort, using the Apollo backpack rates and tank sizes listed in Sources. '}"Go on only above" is the least ${rover ? 'battery' : 'suit energy'} needed at that point to finish the plan and keep the 20 % reserve. Times and dose are for the weather set now.</p>
+      <div class="row"><button data-sheet="print" class="primary">Print</button><button data-sheet="close">Close</button></div>`;
+    sheet.hidden = false;
   }
 
   private onPlannerClick(event: Event): void {
@@ -684,6 +733,7 @@ export class Hud {
     const route = target.closest<HTMLElement>('[data-route]')?.dataset.route;
     if (route !== undefined) return this.actions.selectRoute(Number(route));
     switch (target.closest<HTMLElement>('[data-action]')?.dataset.action) {
+      case 'checklist': return this.renderChecklist();
       case 'go': return this.actions.go();
       case 'stop': return this.actions.stop();
       case 'clear': return this.actions.clearRoute();
@@ -701,4 +751,12 @@ export class Hud {
       default:
     }
   }
+}
+
+/** Oxygen and cooling water left at the end of the trip; empty for the rover, which has its own cabin supply. */
+function supplies(route: Route): string {
+  const end = route.stats.trip.checkpoints.at(-1);
+  if (!end || end.oxygen === null || end.water === null) return '';
+  const share = (value: number) => Math.round(Math.max(0, value) * 100);
+  return `<span>oxygen ${share(end.oxygen)} % · water ${share(end.water)} % left</span>`;
 }
