@@ -244,6 +244,8 @@ export class Router {
     const s = analysis.index(start.x, start.z);
     const t = analysis.index(goal.x, goal.z);
     const { g, from, closed } = this;
+    // Standing on no-go ground already (e.g. dropped there): allow the first step out.
+    const escaping = analysis.effectiveSlope(s) >= profile.maxSlope;
     g.fill(Infinity);
     closed.fill(0);
     from.fill(-1);
@@ -267,7 +269,7 @@ export class Router {
         if (nx < 2 || nz < 2 || nx >= GRID - 2 || nz >= GRID - 2) continue;
         const next = nz * GRID + nx;
         if (closed[next]) continue;
-        const cost = this.stepCost(next, step * analysis.cell, profile, kind, next === t || current === s);
+        const cost = this.stepCost(next, step * analysis.cell, profile, kind, next === t || (escaping && current === s));
         if (!Number.isFinite(cost)) continue;
         const total = g[current] + cost;
         if (total < g[next]) {
@@ -294,7 +296,7 @@ export class Router {
   private stepCost(cell: number, length: number, profile: TravelProfile, kind: RouteKind, endpoint: boolean): number {
     const analysis = this.analysis;
     const slope = analysis.effectiveSlope(cell);
-    // The cells the traveller starts from or clicked on are always enterable.
+    // The clicked cell is always enterable, so a route can end at a steep target and be rated honestly.
     if (slope >= profile.maxSlope && !endpoint) return Infinity;
     const time = length / (profile.speed * speedFactor(slope, profile));
     if (kind === 'fastest') return time;
