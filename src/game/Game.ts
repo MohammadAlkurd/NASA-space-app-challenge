@@ -359,6 +359,10 @@ export class Game {
   private go(): void {
     const route = this.routes[this.selected];
     if (!route) return;
+    if (route.stats.noGoM > 0) {
+      this.hud.toast(`This route crosses ${Math.round(route.stats.noGoM)} m of no-go slope (red). Change it or pick a safe route.`);
+      return;
+    }
     const lengths = [0];
     for (let k = 1; k < route.points.length; k += 1) {
       lengths.push(lengths[k - 1] + Math.hypot(route.points[k].x - route.points[k - 1].x, route.points[k].z - route.points[k - 1].z));
