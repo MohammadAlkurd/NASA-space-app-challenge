@@ -16,7 +16,7 @@ import {
   type Route, type RoutePoint, type TripContext,
 } from '../planning/Router';
 import { Contingency } from '../planning/Contingency';
-import { SHELTER_WALK_S, SUIT_ENERGY_J, SUIT_WORK_S, WORK_RATE_W, gradeDeg, pace, travelEnergyJ } from '../planning/Models';
+import { MODEL, SHELTER_WALK_S, SUIT_ENERGY_J, SUIT_WORK_S, WORK_RATE_W, gradeDeg, pace, travelEnergyJ } from '../planning/Models';
 import { clock, timeRoute } from '../planning/Timeline';
 import { Hud, type Tool, type ViewId } from '../ui/Hud';
 import { Globe, SITES } from '../world/Globe';
@@ -912,12 +912,13 @@ export class Game {
     const shield = this.camping ? CAMP_DOSE_FACTOR : 1;
     this.doseTotal += (doseRate(this.analysis.skyView[cell]) * (this.conditions?.doseFactor ?? 1) * shield * missionSeconds) / 3600;
     const moved = Math.hypot(explorer.position.x - this.lastPosition.x, explorer.position.z - this.lastPosition.z);
-    // Moving costs the Santee (on foot) or Carr (rover) energy for the slope actually covered; standing costs the Apollo work rate.
+    // Moving costs the Santee (on foot) or Carr (rover) energy for the slope actually covered. Standing costs the Apollo work rate;
+    // a parked rover with its crew awake keeps drawing its electronics, as the planned stop does.
     const travelJ = moved > 1e-3 && missionSeconds > 0
       ? travelEnergyJ(this.traveller, moved, gradeDeg(explorer.position.y - this.lastPosition.y, moved), moved / missionSeconds)
       : 0;
     if (this.traveller === 'astronaut') this.suitJ += travelJ || WORK_RATE_W * missionSeconds;
-    else this.energyWh += travelJ / 3600;
+    else this.energyWh += (travelJ || (this.camping ? 0 : MODEL.roverElectronics.value * missionSeconds)) / 3600;
     // The rover's panel charges its battery wherever it stands; a camped crew tops the suit up from the rover.
     const roverCell = this.analysis.index(this.rover.position.x, this.rover.position.z);
     const panelW = this.analysis.solarAt(roverCell, this.sunSample(this.hour, this.scenario)) * PANEL_W_PER_WM2;
