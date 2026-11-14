@@ -5,6 +5,8 @@ import { HOUR_SECONDS, type Environment } from '../data/Environment';
 export interface RouteTiming {
   startHour: number;
   endHour: number;
+  /** Travel time in the active conditions (dust slows travel), seconds. */
+  durationS: number;
   minAirC: number;
   maxAirC: number;
   minSunDeg: number;
@@ -93,7 +95,7 @@ export function timeRoute(
   }
   const apart = Math.min(Math.abs(best - startHour), 24 - Math.abs(best - startHour));
   return {
-    startHour, endHour, minAirC: s.minAirC, maxAirC: s.maxAirC, minSunDeg: s.minSunDeg,
+    startHour, endHour, durationS, minAirC: s.minAirC, maxAirC: s.maxAirC, minSunDeg: s.minSunDeg,
     doseUSv: doseUSv * now.doseFactor,
     verdict, warnings,
     betterStart: apart > 0.5 && warnings.length > (scenarioReason ? 1 : 0) ? best : null,

@@ -538,11 +538,14 @@ export class Hud {
     const route = routes[this.selected];
     const rover = this.traveller === 'rover';
     const cards = routes.map((r, index) => {
-      const resource = rover ? `${Math.round((r.stats.resource / ROVER_BATTERY_WH) * 100)} % battery` : `${Math.round(r.stats.resource * 100)} % suit time`;
+      // Dust slows travel: show the time, and the suit time it uses, for the conditions outside now.
+      const durationS = this.timings[index]?.durationS ?? r.stats.durationS;
+      const slow = r.stats.durationS > 0 ? durationS / r.stats.durationS : 1;
+      const resource = rover ? `${Math.round((r.stats.resource / ROVER_BATTERY_WH) * 100)} % battery` : `${Math.round(r.stats.resource * slow * 100)} % suit time`;
       return `<button class="route ${index === this.selected ? 'active' : ''}" data-route="${index}">
         <b>${r.label}</b>
         <span class="chip" style="--tone:${RATING_COLORS[r.stats.worst]}">${r.stats.worst}</span>
-        <span>${formatDuration(r.stats.durationS)} · ${(r.stats.distanceM / 1000).toFixed(2)} km</span>
+        <span>${formatDuration(durationS)} · ${(r.stats.distanceM / 1000).toFixed(2)} km</span>
         <span>${resource} · ${(this.timings[index]?.doseUSv ?? r.stats.doseUSv).toFixed(1)} µSv</span>
         <span>max slope ${r.stats.maxSlopeDeg.toFixed(0)}° · climb ${r.stats.ascentM.toFixed(0)} m</span>
         ${r.stops.length ? `<span class="science">via ${r.stops.map(escapeHtml).join(', ')}</span>` : ''}
