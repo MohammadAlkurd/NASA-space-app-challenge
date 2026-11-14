@@ -569,7 +569,7 @@ export class Game {
           else lo = mid;
         }
         point.copy(origin).addScaledVector(direction, hi);
-        return field.contains(point.x, point.z, 25) ? point : null;
+        return field.contains(point.x, point.z, 40) ? point : null;
       }
     }
     return null;

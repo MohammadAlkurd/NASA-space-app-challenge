@@ -76,7 +76,8 @@ export abstract class Explorer {
     const nz = z + this.forward.z * step;
     const look = Math.sign(step) * 1.5;
     const slopeAhead = field.slopeDegAt(nx + this.forward.x * look, nz + this.forward.z * look, 2.5);
-    const inside = field.contains(nx, nz, 40);
+    // Near the map edge only moves back toward the middle are allowed.
+    const inside = field.contains(nx, nz, 40) || Math.max(Math.abs(nx), Math.abs(nz)) < Math.max(Math.abs(x), Math.abs(z));
     // Refuse to enter no-go slopes, but always allow backing out of one.
     this.blocked = step !== 0 && (!inside || (slopeAhead > profile.maxSlope && slopeAhead >= this.slopeDeg));
     if (this.blocked) {
