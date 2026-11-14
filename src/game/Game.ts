@@ -151,11 +151,15 @@ export class Game {
         this.refreshSolarDay();
         if (this.layer === 'solar') this.setLayer('solar');
         // Dust slows travel, which changes the energy every route needs: plan the trip again for the new weather.
+        const chosen = this.routes[this.selected]?.kind;
         if (this.following || !this.routes.length) this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
-        else if (this.tool === 'draw' && this.destination) this.compareDrawing();
+        else if (this.tool === 'draw' && this.routes.length > 1) this.compareDrawing();
         else if (this.tool === 'draw') this.refreshDrawing();
         else if (this.destination) this.planTo(this.destination);
         else this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
+        // Planning again starts on the first route: go back to the one that was picked.
+        const keep = this.routes.findIndex((route) => route.kind === chosen);
+        if (keep > 0 && keep !== this.selected) this.showRoutes(this.routes, keep);
         if (scenario !== 'clear' && this.started) this.stormAlert(scenario);
       },
       selectRoute: (index) => this.selectRoute(index),
