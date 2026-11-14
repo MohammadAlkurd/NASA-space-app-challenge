@@ -646,7 +646,9 @@ export class Hud {
       // Dust slows travel: show the times for the conditions outside now.
       const trip = r.stats.trip;
       const totalS = this.timings[index]?.durationS ?? trip.totalS;
-      const durationS = trip.totalS > 0 ? (r.stats.durationS * totalS) / trip.totalS : r.stats.durationS;
+      // Only the travel stretches with the weather; the time at the stop does not.
+      const travelS = trip.totalS - trip.stopS;
+      const durationS = travelS > 0 ? (r.stats.durationS * (totalS - trip.stopS)) / travelS : r.stats.durationS;
       const share = rover ? trip.resource / ROVER_BATTERY_WH : trip.resource;
       const resource = `${Number.isFinite(share) ? Math.round(share * 100) : '—'} % ${rover ? 'battery' : 'suit energy'}`;
       const whole = trip.oneWay ? 'One way to shelter' : `There and back ${formatDuration(totalS)}`;
