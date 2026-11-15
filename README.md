@@ -5,7 +5,7 @@ A layered Marswalk planner for Jezero Crater and Gale Crater, built on real NASA
 
 Click anywhere on a 5 km × 5 km piece of Mars and get safe routes for an astronaut on foot or a crew rover, rated
 stretch by stretch (Safe / Be careful / Danger / No-go) with the reason. Switch data layers to see why: slopes,
-elevation, radiation shelter, heat. Walk or drive the route in 3D with a helmet display showing weather, radiation
+elevation, radiation shelter, heat, radio line of sight to the lander. Walk or drive the route in 3D with a helmet display showing weather, radiation
 dose and suit energy. Visit the real science stops of Perseverance (Jezero) or Curiosity (Gale) and see the photo the rover took at each one.
 
 ## How it answers the challenge

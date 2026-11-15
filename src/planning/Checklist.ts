@@ -59,6 +59,7 @@ export function abortRules(route: Route, rows: ChecklistRow[]): string[] {
   }
   if (trip.turnBack) rules.push(`Do not go past the turn-back point at ${(trip.turnBackM / 1000).toFixed(2)} km: beyond it the walk home breaks the suit-energy rule or the ${MODEL.shelterWalk.value} min shelter rule.`);
   if (!rover) rules.push(`If the suit CO₂ scrubber fails, walk to the nearest shelter at once. "Shelter walk" is how long that takes at ${MODEL.shelterPace.value} km/h; NASA tested ${MODEL.shelterWalk.value} min.`);
+  if (route.stats.noLinkM >= 10) rules.push(`Terrain hides the lander antenna for ${Math.round(route.stats.noLinkM / 10) * 10} m of the way out: no direct radio link there.`);
   rules.push(`On a solar storm alert, go to the ${rover ? 'lander' : 'rover or the lander'}: the dose rate rises about ${MODEL.stormDose.value} times.`);
   return rules;
 }

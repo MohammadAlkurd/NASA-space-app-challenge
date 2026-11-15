@@ -18,7 +18,7 @@ async function canvasIsNonBlank(page: Page): Promise<{ ok: boolean; variance: nu
 
 type Mars = {
   planToStop(id: string): {
-    label: string; distanceM: number; durationS: number; worst: string; noGoM: number;
+    label: string; distanceM: number; durationS: number; worst: string; noGoM: number; noLinkM: number;
     trip: { oneWay: boolean; totalS: number; resource: number; verdict: string };
   }[];
   go(): void;
@@ -85,6 +85,9 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   expect(routes[0].label).toContain('Safest');
   expect(routes[0].noGoM).toBe(0);
   expect(routes[0].distanceM).toBeGreaterThan(500);
+  // Radio: the stay-in-coverage route is never out of the antenna's sight for longer than the others.
+  const linked = routes.find((r) => r.label.includes('In radio range'));
+  if (linked) expect(linked.noLinkM).toBeLessThanOrEqual(Math.min(...routes.map((r) => r.noLinkM)));
   await expect(page.locator('#planner .route')).toHaveCount(routes.length);
 
   // A Marswalk is checked there and back: travel out, 30 min at the stop, and the way home.
@@ -130,6 +133,7 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   const [geo] = await Promise.all([page.waitForEvent('download'), page.locator('#planner [data-action="geojson"]').click()]);
   const saved = JSON.parse((await (await geo.createReadStream()).toArray()).join(''));
   expect(saved.features[0].properties.abort_rules.length).toBeGreaterThanOrEqual(3);
+  expect(saved.features[0].properties.no_radio_link_m).toBeGreaterThanOrEqual(0);
   expect(saved.features[0].properties.safety_rules.length).toBe(await safetyRows.count());
   expect(saved.features[0].properties.safety_rules[0].numbers[0]).toMatchObject({ label: expect.any(String), source: expect.any(String) });
   expect(saved.features[0].properties.oxygen_left_at_end_pct).toBe(oxygen.at(-1));
@@ -165,9 +169,9 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await expect(page.locator('#planner .route').first()).toBeVisible();
 
   // Each layer can be switched on.
-  for (const layer of ['hazard', 'elevation', 'radiation', 'thermal', 'optical']) {
-    await page.click(`[data-layer="${layer}"]`);
-    await expect(page.locator(`[data-layer="${layer}"]`)).toHaveClass(/active/);
+  for (const layer of ['hazard', 'elevation', 'radiation', 'thermal', 'signal', 'optical']) {
+    await page.click(`#layer-list [data-layer="${layer}"]`);
+    await expect(page.locator(`#layer-list [data-layer="${layer}"]`)).toHaveClass(/active/);
   }
 
   // Follow the route: position changes and dose accumulates.
@@ -268,6 +272,18 @@ test('lander safe zone refills the suit, F switches the lights and an empty suit
     mars.setSuit(0.5);
     mars.setTimeScale(60);
   });
+  // Data layers stay off the ground in Explore: the minimap shows them, and clicking it lists the choices.
+  await page.click('#minimap');
+  await expect(page.locator('#radar-layers')).toBeVisible();
+  await page.click('#radar-list [data-layer="radiation"]');
+  await expect(page.locator('#radar-layers')).toBeHidden();
+  await expect(page.locator('#radar-tag')).toHaveText('Radiation');
+  const shown = () => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__ as unknown as { layer: string; groundLayer: boolean });
+  expect(await shown()).toMatchObject({ layer: 'radiation', groundLayer: false });
+  await page.click('#mode [data-mode="plan"]');
+  expect(await shown()).toMatchObject({ layer: 'radiation', groundLayer: true });
+  await page.click('#mode [data-mode="explore"]');
+  expect(await shown()).toMatchObject({ layer: 'radiation', groundLayer: false });
   // The crew starts at the foot of the lander's ladder, inside its safe zone, where the suit refills.
   const start = await state();
   expect(start.safe).toBe(true);

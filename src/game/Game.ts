@@ -21,6 +21,7 @@ import { advise, safetyRules, type SafetyRule } from '../planning/Safety';
 import { MODEL, SHELTER_WALK_S, SUIT_ENERGY_J, SUIT_WORK_S, WORK_RATE_W, gradeDeg, pace, travelEnergyJ } from '../planning/Models';
 import { clock, timeRoute } from '../planning/Timeline';
 import { Hud, type Prompt, type Tool, type ViewId } from '../ui/Hud';
+import { coverage } from '../planning/Signal';
 import { Globe, SITES } from '../world/Globe';
 import { Markers, STOP_RANGE, type Mission, type Stop } from '../world/Markers';
 import { Rocks } from '../world/Rocks';
@@ -251,6 +252,7 @@ export class Game {
     this.rover.place(landing.x + ROVER_OFFSET.x, landing.z + ROVER_OFFSET.z, -Math.PI / 2);
     this.base = { x: landing.x, z: landing.z };
     this.markers.setBase(this.base);
+    this.analysis.signal = coverage(this.analysis, this.base);
     this.refreshSolarDay();
     this.placeLander();
     try {
@@ -262,7 +264,7 @@ export class Game {
     this.lastPosition.copy(this.astronaut.position);
     this.rig.distance = 11;
 
-    this.hud.setLayer(this.layer);
+    this.setLayer(this.layer);
     this.hud.setTraveller(this.traveller);
     this.hud.setTimeScale(this.timeScale);
     this.events = new NaturalEvents(environment.season.dustSeason);
@@ -433,13 +435,21 @@ export class Game {
 
   private setLayer(layer: LayerId): void {
     this.layer = layer;
-    this.terrain.setOverlay(this.analysis.overlay(layer, this.active.profile), 0.92);
-    this.hud.setLayer(layer);
+    const texture = this.showLayer();
+    this.hud.setLayer(layer, texture ? (texture.image.data as Uint8Array) : null);
+  }
+
+  /** Data layers colour the planning map only. On the ground they stay off the terrain and show on the minimap. */
+  private showLayer(): THREE.DataTexture | null {
+    const texture = this.analysis.overlay(this.layer, this.active.profile);
+    this.terrain.setOverlay(this.rig.mode === 'map' ? texture : null, 0.92);
+    return texture;
   }
 
   private setCamera(mode: CameraMode): void {
     if (mode !== 'map') this.groundMode = mode;
     this.rig.setMode(mode, this.active.position);
+    this.showLayer();
     if (mode === 'map') {
       if (this.routes.length) this.frameRoutes();
       else this.frameAround(this.active.position, 700);
@@ -1202,6 +1212,7 @@ export class Game {
       panelW: this.analysis.solarAt(cell, sun) * PANEL_W_PER_WM2,
       panelDayKWh: ((this.analysis.solarDay?.[cell] ?? 0) * PANEL_W_PER_WM2) / 1000,
       inShadow: sun.wm2 > 0 && !this.analysis.sunlit(cell, sun.elevationDeg, sun.azimuthDeg),
+      radioLink: this.analysis.signal?.[cell] !== 0,
       camping: this.camping,
       safe: this.inSafeZone,
       battery: 1 - this.energyWh / ROVER_BATTERY_WH,
@@ -1425,6 +1436,8 @@ export class Game {
       tool: this.tool,
       following: this.following,
       routes: this.routes.length,
+      groundLayer: this.terrain.overlayShown,
+      radio: { covered: this.analysis.signal ? this.analysis.signal.reduce((sum, v) => sum + v, 0) / this.analysis.signal.length : 0, noLinkM: this.routes.map((r) => Math.round(r.stats.noLinkM)) },
       hour: this.hour,
       sol: this.sol,
       sun: { elevation: this.environment.at(this.hour).sunElevationDeg, azimuth: this.environment.at(this.hour).sunAzimuthDeg },

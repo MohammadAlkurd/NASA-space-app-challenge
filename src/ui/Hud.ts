@@ -49,6 +49,8 @@ export interface Telemetry {
   /** Expected panel energy over one sol at this spot, kWh. */
   panelDayKWh: number;
   inShadow: boolean;
+  /** The lander antenna is in line of sight from here. */
+  radioLink: boolean;
   /** 0..1 of the rover battery left. */
   battery: number;
   /** Seconds of cabin air left for one person. */
@@ -136,6 +138,7 @@ const LAYERS: { id: LayerId; name: string; source: string; legend: string }[] = 
   { id: 'elevation', name: 'Elevation', source: 'HiRISE stereo elevation, tied to MOLA', legend: '<i style="background:#26468c"></i>Low <i style="background:#82be6e"></i> <i style="background:#e6d778"></i> <i style="background:#aa4632"></i>High, lines every 10 m' },
   { id: 'radiation', name: 'Radiation', source: 'Curiosity RAD dose + sky visibility', legend: '<i style="background:#eb3c96"></i>Open sky, full dose <i style="background:#23d2d2"></i>Sheltered by terrain' },
   { id: 'solar', name: 'Solar', source: 'Estimate: sun path + HiRISE terrain shadows + dust', legend: '<i style="background:#2846aa"></i>30 % less sun or worse (slopes, shadow) <i style="background:#ffdc28"></i>Full sun all sol: best for panels' },
+  { id: 'signal', name: 'Radio', source: 'Estimate: line of sight to the lander antenna over the HiRISE elevation model', legend: '<i style="background:#46dc96"></i>Lander antenna in sight <i style="background:#3c146e"></i>Hidden by terrain: no direct radio link' },
   { id: 'thermal', name: 'Heat', source: 'THEMIS infrared, Mars Odyssey (100 m)', legend: '<i style="background:#3b1a6e"></i>Cooler in daytime <i style="background:#ffe066"></i>Warmer (dust, dark sand)' },
 ];
 
@@ -167,6 +170,8 @@ export class Hud {
   private activeRule = '';
   private nearStop: Stop | null = null;
   private readonly mapImage = new Image();
+  /** The chosen data layer as a picture for the minimap; null for the plain photo. */
+  private layerImage: HTMLCanvasElement | null = null;
 
   constructor(private readonly actions: HudActions, private readonly photoBase: string, private readonly sitePhotoBase: string) {
     this.root = el<HTMLElement>(document, '#ui');
@@ -197,7 +202,12 @@ export class Hud {
         <div id="guidance" hidden></div>
 
         <div id="radar" class="explore">
-          <canvas id="minimap" width="352" height="352"></canvas>
+          <canvas id="minimap" width="352" height="352" title="Choose what the minimap shows"></canvas>
+          <button id="radar-tag" title="Choose what the minimap shows"></button>
+          <div id="radar-layers" hidden>
+            <div id="radar-list"></div>
+            <p id="radar-legend" class="legend"></p>
+          </div>
           <button id="near" class="shot" title="Nearest science site"><img alt="" /><span><b></b><i></i></span></button>
         </div>
         <div id="vitals" class="explore">
@@ -268,6 +278,7 @@ export class Hud {
             <div><h3>Ground</h3><dl>
               <div><dt>Elevation</dt><dd id="t-elevation"></dd></div>
               <div><dt>Slope</dt><dd id="t-slope"></dd></div>
+              <div><dt>Radio to base</dt><dd id="t-radio"></dd></div>
             </dl></div>
           </div>
           <div class="controls">
@@ -335,7 +346,9 @@ export class Hud {
     el(this.root, '#about-close').addEventListener('click', () => (el(this.root, '#about').hidden = true));
     el(this.root, '#photo').addEventListener('click', () => (el(this.root, '#photo').hidden = true));
     this.mapImage.src = `${this.photoBase}ortho.jpg`;
-    el(this.root, '#layer-list').innerHTML = LAYERS.map((layer) => `<button data-layer="${layer.id}" title="${escapeHtml(layer.source)}">${layer.name}</button>`).join('');
+    const layerButtons = LAYERS.map((layer) => `<button data-layer="${layer.id}" title="${escapeHtml(layer.source)}">${layer.name}</button>`).join('');
+    el(this.root, '#layer-list').innerHTML = layerButtons;
+    el(this.root, '#radar-list').innerHTML = layerButtons;
     this.renderPlanner();
   }
 
@@ -393,9 +406,23 @@ export class Hud {
     el(this.root, '#load-status').textContent = text;
   }
 
-  setLayer(layer: LayerId): void {
+  /** @param pixels the layer's colours, one RGBA value per planning cell, north row first; null for the plain photo. */
+  setLayer(layer: LayerId, pixels: Uint8Array | null): void {
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-layer]')) button.classList.toggle('active', button.dataset.layer === layer);
-    el(this.root, '#legend').innerHTML = LAYERS.find((l) => l.id === layer)?.legend ?? '';
+    const chosen = LAYERS.find((l) => l.id === layer);
+    el(this.root, '#legend').innerHTML = chosen?.legend ?? '';
+    el(this.root, '#radar-legend').innerHTML = chosen?.legend ?? '';
+    el(this.root, '#radar-tag').textContent = chosen?.name ?? '';
+    this.layerImage = null;
+    if (!pixels) return;
+    const side = Math.sqrt(pixels.length / 4);
+    const canvas = document.createElement('canvas');
+    canvas.width = side;
+    canvas.height = side;
+    const image = new ImageData(side, side);
+    image.data.set(pixels);
+    canvas.getContext('2d')?.putImageData(image, 0, 0);
+    this.layerImage = canvas;
   }
 
   setTraveller(mode: TravelMode): void {
@@ -540,6 +567,7 @@ export class Hud {
     set('#t-solar-day', `${t.panelDayKWh.toFixed(1)} kWh`);
     set('#t-elevation', `${t.elevationM.toFixed(0)} m`);
     set('#t-slope', `${t.slopeDeg.toFixed(0)}°`);
+    set('#t-radio', t.radioLink ? 'In sight' : 'Hidden by terrain');
     set('#t-hour', time);
     const slider = el<HTMLInputElement>(this.root, '#hour');
     if (!this.draggingHour) slider.value = String(t.hour);
@@ -578,6 +606,10 @@ export class Hud {
       ctx.fillStyle = '#c98f66';
       ctx.fillRect(0, 0, size, size);
       ctx.globalCompositeOperation = 'source-over';
+    }
+    if (this.layerImage) {
+      const scale = this.layerImage.width / (map.half * 2);
+      ctx.drawImage(this.layerImage, (you.x - RADAR_M + map.half) * scale, (you.z - RADAR_M + map.half) * scale, RADAR_M * 2 * scale, RADAR_M * 2 * scale, 0, 0, size, size);
     }
     if (map.route) {
       ctx.strokeStyle = '#74c7f4';
@@ -751,6 +783,7 @@ export class Hud {
         <li id="trip-check" style="--tone:${checkTone}"><b>${check.verdict}</b> ${escapeHtml(check.reason)}</li>
         ${timing ? `<li style="--tone:${tone}"><b>${timing.verdict}</b> ${clock(timing.startHour)} to ${clock(timing.endHour)}, ${timing.minAirC.toFixed(0)} to ${timing.maxAirC.toFixed(0)} °C${timing.warnings[0] ? `. ${escapeHtml(timing.warnings[0])}` : ''}</li>` : ''}
         ${timing && timing.betterStart !== null ? `<li style="--tone:var(--color-accent)">Better at ${clock(timing.betterStart)}. <button class="link" data-action="best-time">Set</button></li>` : ''}
+        ${route.stats.noLinkM >= 10 ? `<li id="radio-check" style="--tone:var(--color-care)"><b>RADIO</b> ${Math.round(route.stats.noLinkM / 10) * 10} m out of sight of the lander antenna</li>` : ''}
         ${warnings}
       </ul>`;
     planner.innerHTML = `
@@ -837,7 +870,12 @@ export class Hud {
     const odds = target.closest<HTMLElement>('[data-odds]')?.dataset.odds as Odds | undefined;
     if (odds) return this.actions.setOdds(odds);
     const layer = target.closest<HTMLElement>('[data-layer]')?.dataset.layer as LayerId | undefined;
-    if (layer) return this.actions.setLayer(layer);
+    const radarLayers = el(this.root, '#radar-layers');
+    if (layer) {
+      radarLayers.hidden = true;
+      return this.actions.setLayer(layer);
+    }
+    if (target.closest('#minimap, #radar-tag')) return void (radarLayers.hidden = !radarLayers.hidden);
     const prompt = target.closest<HTMLElement>('[data-prompt]')?.dataset.prompt;
     if (prompt) return prompt === 'camp' ? this.actions.camp() : prompt === 'lights' ? this.actions.lights() : prompt === 'site' ? this.actions.viewSite() : this.actions.interact();
     if (target.closest('[data-land]')) return this.actions.start();

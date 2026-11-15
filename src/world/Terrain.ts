@@ -433,6 +433,11 @@ export class Terrain {
     this.overlay.uOverlayOpacity.value = texture ? opacity : 0;
   }
 
+  /** True while a data layer is painted over the ground. */
+  get overlayShown(): boolean {
+    return this.overlay.uOverlayOpacity.value > 0;
+  }
+
   /** Pick each chunk's level of detail from its distance to the camera, and keep the sharp photo under it. */
   update(camera: THREE.Vector3, onGround = true): void {
     if (onGround) this.near?.update(camera.x, camera.z);
