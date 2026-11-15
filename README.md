@@ -1,5 +1,27 @@
 # Mars Base Explorer
 
+**Play it in your browser (no install, no login): https://mohammadalkurd.github.io/NASA-space-app-challenge/**
+
+NASA Space Apps Challenge 2026, challenge "Interplanetary Survival Guide: Martian Map", team **Invincibles**.
+
+| What | Where |
+| --- | --- |
+| Playable game | https://mohammadalkurd.github.io/NASA-space-app-challenge/ |
+| Space Apps project page (summary, team members) | https://www.spaceappschallenge.org/2026/find-a-team/invincibles1/?tab=project |
+| Presentation, 7 slides with the 30 second demo on the last slide (PowerPoint, downloads) | [Mars-Base-Explorer-Invincibles.pptx](https://github.com/MohammadAlkurd/NASA-space-app-challenge/releases/download/demo-video/Mars-Base-Explorer-Invincibles.pptx) |
+| Demo video, 30 seconds (MP4, downloads) | [mars-base-explorer-demo-30s.mp4](https://github.com/MohammadAlkurd/NASA-space-app-challenge/releases/download/demo-video/mars-base-explorer-demo-30s.mp4) |
+| Demo video, 1 minute (MP4, downloads) | [mars-base-explorer-demo-60s.mp4](https://github.com/MohammadAlkurd/NASA-space-app-challenge/releases/download/demo-video/mars-base-explorer-demo-60s.mp4) |
+| Every feature, section by section | [docs/features.md](docs/features.md) |
+| How it meets each point of the challenge | [docs/challenge-checklist.md](docs/challenge-checklist.md) |
+| Every data source and reference, with links | [docs/references.md](docs/references.md) |
+| Design notes | [docs/design.md](docs/design.md) |
+
+| Plan: rated routes | Explore: helmet display and crew rover |
+| --- | --- |
+| ![Planning map with three rated routes](docs/screens/plan-rated-routes.png) | ![Ground view with the crew rover](docs/screens/helmet-view.png) |
+| **Safety guide (H)** | **Solar storm: what to do now** |
+| ![Safety guide table](docs/screens/safety-guide.png) | ![Solar storm card and route back to shelter](docs/screens/solar-storm-card.png) |
+
 A layered Marswalk planner for Jezero Crater and Gale Crater, built on real NASA data, for the NASA Space Apps Challenge 2026:
 **Interplanetary Survival Guide: Martian Map**.
 
@@ -47,15 +69,17 @@ All map data is pre-processed and committed under `public/data/`, so the build n
 
 | Layer | Source | Credit |
 | --- | --- | --- |
-| Terrain shape, slopes | Mars 2020 TRN HiRISE DTM mosaic, 1 m | USGS Astrogeology / NASA / JPL-Caltech / University of Arizona |
-| Ground photo | Mars 2020 TRN HiRISE orthomosaic, 25 cm (1.25 m per pixel for the whole site, full 25 cm tiles within about 100 m of the traveller) | same |
+| Terrain shape, slopes | HiRISE DTM mosaics, 1 m. Jezero: Mars 2020 TRN mosaic. Gale: MSL Gale merged DEM | USGS Astrogeology / NASA / JPL-Caltech / University of Arizona |
+| Ground photo | HiRISE orthomosaics, 25 cm, from the same two products (1.25 m per pixel for the whole site, full 25 cm tiles within about 100 m of the traveller) | same |
 | Heat | THEMIS daytime IR global mosaic, 100 m | NASA / JPL-Caltech / Arizona State University / USGS |
-| Weather | MEDA derived + calibrated data, sol 200 | NASA PDS Atmospheres Node, Rodriguez-Manfredi et al. |
+| Weather | One measured sol per site. Jezero: MEDA on Perseverance, sol 200. Gale: REMS on Curiosity, sol 196 | NASA PDS Atmospheres Node, Rodriguez-Manfredi et al.; Gomez-Elvira et al. |
+| Dust in the air | Optical depth from the rover mast cameras. Jezero: Mastcam-Z, sol 200. Gale: Mastcam, sol 198 | M. Lemmon (Mendeley Data); Lemmon et al., NASA PDS Atmospheres Node |
 | Radiation | RAD surface dose 0.67 mSv/day; Murray Buttes shielding | Hassler et al. 2014; Ehresmann et al. 2021 (MSL/RAD) |
 | Space weather | DONKI SEP and CME lists | NASA CCMC |
-| Science stops, traverse, photos | Mars 2020 mission map and raw image archive | NASA/JPL-Caltech |
+| Science stops, traverse, photos | Mars 2020 and Curiosity mission maps and raw image archives | NASA/JPL-Caltech |
 | Crew rover and astronaut models | Space Exploration Vehicle and Mark III Spacesuit, NASA 3D Resources (github.com/nasa/NASA-3D-Resources), reduced and with the logo removed | NASA |
 
+The links for every row, and the papers behind the storm rates, are in [docs/references.md](docs/references.md).
 Measured vs. estimated values and model limits are listed in the in-app **Sources** panel (`src/ui/about.ts`).
 NASA does not endorse this project. No NASA logos are used.
 
@@ -64,8 +88,8 @@ NASA does not endorse this project. No NASA logos are used.
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r pipeline/requirements.txt
-python pipeline/build_site.py jezero       # terrain + photo (reads the USGS GeoTIFFs over HTTP)
-python pipeline/build_mission.py jezero    # science stops, photos, weather, heat layer
+python pipeline/build_site.py jezero       # terrain + photo (reads the USGS GeoTIFFs over HTTP); or gale
+python pipeline/build_mission.py jezero    # science stops, photos, weather, heat layer; or gale
 ```
 
 The two models in `public/models/` are built from the NASA 3D Resources GLB files:
@@ -87,6 +111,8 @@ node build_suit.mjs suit.glb ../../public/models/astronaut.glb
 
 ## Tools and AI use
 
-three.js, TypeScript, Vite, Playwright; Python with rasterio, NumPy, SciPy, Pillow. AI coding assistants
-(Devin by Cognition) helped write code and process data; the team reviewed and tested the result.
-No AI-generated images are used.
+three.js, TypeScript, Vite, Playwright; Python with rasterio, NumPy, SciPy, Pillow; GitHub Actions and GitHub Pages.
+
+Devin (Cognition AI), an AI coding assistant, helped write and test the code, process the NASA data files and draft
+the documentation and the submission text. The team directed the work and reviewed the result.
+The game contains no AI-generated images, video, audio or 3D models.
