@@ -254,7 +254,6 @@ export class Game {
     this.markers.setBase(this.base);
     this.refreshSolarDay();
     this.placeLander();
-    this.analysis.signal = coverage(this.analysis, this.landerPoint);
     try {
       const saved = JSON.parse(localStorage.getItem(LIGHTS_KEY) ?? '{}');
       this.lampOn = Boolean(saved.lamp);
@@ -808,6 +807,8 @@ export class Game {
   /** Stand the lander by the base, ring its safe zone and put the crew at the foot of its ladder, facing the rover. */
   private placeLander(): void {
     this.lander.place(this.base.x + LANDER_OFFSET.x, this.base.z + LANDER_OFFSET.z);
+    this.analysis.setSignal(coverage(this.analysis, this.landerPoint));
+    if (this.layer === 'signal') this.setLayer('signal');
     this.markers.setSafeZone(this.landerPoint, SAFE_RANGE);
     this.spawnAtLander();
   }

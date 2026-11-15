@@ -82,6 +82,13 @@ export class Analysis {
     this.thermalSize = size;
   }
 
+  /** Replace the radio coverage mask and drop its cached overlay. */
+  setSignal(mask: Uint8Array): void {
+    this.signal = mask;
+    this.textures.get('signal')?.dispose();
+    this.textures.delete('signal');
+  }
+
   /** RGBA overlay for a map layer; cached per layer (and per traveller for the hazard layer). */
   overlay(layer: LayerId, profile: TravelProfile): THREE.DataTexture | null {
     if (layer === 'optical') return null;
