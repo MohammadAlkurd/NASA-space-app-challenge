@@ -27,6 +27,11 @@ type Mars = {
   setTraveller(mode: string): void;
 };
 
+// Storms and dust devils arrive at random; the play-throughs switch them off and one test turns them on.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('mbe.odds', 'off'));
+});
+
 test('loads Jezero, plans a safe route to a science stop and follows it', async ({ page }, testInfo) => {
   // Sized for a machine without a GPU, where the scene renders at about one frame a second.
   test.setTimeout(900_000);
@@ -274,7 +279,7 @@ test('lander safe zone refills the suit, F switches the lights and an empty suit
 });
 
 test('the What to do now card follows the storm drills and opens the safety guide', async ({ page }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(600_000);
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -322,6 +327,25 @@ test('the What to do now card follows the storm drills and opens the safety guid
   await page.keyboard.press('Escape');
   await expect(page.locator('#guide')).toBeHidden();
   await drill('clear');
+  await expect(card.locator('b')).toHaveText('All clear', { timeout: 30_000 });
+
+  // With events on, a storm arrives on its own as the Mars clock runs; here the clock is run on for up to 80 sols.
+  await page.click('#stats-button');
+  await expect(page.locator('#odds [data-odds="off"]')).toHaveClass(/active/);
+  await page.click('#odds [data-odds="real"]');
+  await expect(page.locator('#odds-note')).toHaveText('Per sol: solar storm 1 in 477, dust storm out of season.');
+  await page.click('#odds [data-odds="fast"]');
+  await expect(page.locator('#odds-note')).toHaveText('Per sol: solar storm 1 in 5, dust storm out of season.');
+  await page.click('#stats [data-close]');
+  const arrived = await page.evaluate(() => (window.__MARS__ as unknown as { rollEvents(hours: number): string | null }).rollEvents(24 * 80));
+  expect(arrived).toBe('solar');
+  await expect(card.locator('span')).toContainText('Solar particle storm: dose ×3', { timeout: 30_000 });
+  await page.click('#stats-button');
+  await expect(page.locator('#scenario [data-scenario="solar"]')).toHaveClass(/active/);
+  // Picking the clear sol by hand ends it. The clock ran on to an arbitrary hour, so go back to mid-morning.
+  await page.click('#scenario [data-scenario="clear"]');
+  await page.click('#stats [data-close]');
+  await page.evaluate(() => (window.__MARS__ as Drill).setHour(10));
   await expect(card.locator('b')).toHaveText('All clear', { timeout: 30_000 });
   expect(errors).toEqual([]);
 });

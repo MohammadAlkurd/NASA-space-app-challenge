@@ -14,7 +14,7 @@ dose and suit energy. Visit the real science stops of Perseverance (Jezero) or C
 | --- | --- |
 | Layered, integrated view of a Martian location from multiple NASA missions | Switchable layers over two landing sites you can walk, Jezero and Gale, from Mars Reconnaissance Orbiter, Mars Odyssey, Mars Global Surveyor, Curiosity and Perseverance |
 | At least three kinds of data | Optical (HiRISE), topographic (HiRISE/MOLA), thermal (THEMIS), atmospheric (MEDA), radiation (RAD, DONKI) |
-| Astronaut safety, radiation and space weather | A "What to do now" card and a safety guide (press G) with the action, the reason and the sourced number for each hazard; dose rate and trip dose, shelter layer, low-radiation route, DONKI solar-storm status, suit-time budget, slope limits |
+| Astronaut safety, radiation and space weather | A "What to do now" card and a safety guide (press G) with the action, the reason and the sourced number for each hazard; dose rate and trip dose, shelter layer, low-radiation route, DONKI solar-storm status, suit-time budget, slope limits. Solar storms, dust storms and dust devils arrive on their own as the Mars clock runs, at measured rates (Stats > Real odds, or ×100 for a demo); the storm drills force one |
 | Suit mobility, route planning around obstacles | Separate limits for astronaut and rover; A* planner avoids no-go slopes; every risky stretch is explained |
 | Route map to science objectives | Real Perseverance and Curiosity science stops; the Science-rich route visits those on the way |
 | Point-of-view imagery from surface missions | The rover's own Navcam photo at each stop, with credit and link |

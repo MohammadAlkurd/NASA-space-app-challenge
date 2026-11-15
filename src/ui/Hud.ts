@@ -1,5 +1,6 @@
 import { clock, type RouteTiming } from '../planning/Timeline';
 import type { TravelMode } from '../entities/Explorer';
+import { FAST_ODDS, type Odds } from '../data/Events';
 import type { LayerId } from '../planning/Analysis';
 import type { BaseScore } from '../planning/BaseSite';
 import { abortRules, checklistRows } from '../planning/Checklist';
@@ -105,6 +106,8 @@ export interface HudActions {
   pickSite(name: string): void;
   setHour(hour: number): void;
   setScenario(scenario: 'clear' | 'dust' | 'solar'): void;
+  /** How often storms and dust devils arrive on their own. */
+  setOdds(odds: Odds): void;
   setTool(tool: Tool): void;
   selectRoute(index: number): void;
   go(): void;
@@ -272,6 +275,12 @@ export class Hud {
               <button data-scenario="dust">Dust storm</button>
               <button data-scenario="solar">Solar storm</button>
             </div>
+            <div class="segmented" id="odds" title="Storms and dust devils arrive on their own at measured rates">
+              <button data-odds="off">No events</button>
+              <button data-odds="real">Real odds</button>
+              <button data-odds="fast">Odds ×${FAST_ODDS}</button>
+            </div>
+            <p id="odds-note"></p>
             <button data-open="guide">Safety guide</button>
             <button data-open="about">Sources</button>
           </div>
@@ -390,6 +399,15 @@ export class Hud {
 
   setScenario(scenario: string): void {
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-scenario]')) button.classList.toggle('active', button.dataset.scenario === scenario);
+  }
+
+  /** `perSol` is the chance of each storm starting on any one sol. */
+  setOdds(odds: Odds, perSol: { solar: number; dust: number }): void {
+    for (const button of this.root.querySelectorAll<HTMLElement>('[data-odds]')) button.classList.toggle('active', button.dataset.odds === odds);
+    const oneIn = (chance: number) => (chance > 0 ? `1 in ${Math.round(1 / chance).toLocaleString('en-US')}` : 'none');
+    el(this.root, '#odds-note').textContent = odds === 'off'
+      ? 'Only the drills above.'
+      : `Per sol: solar storm ${oneIn(perSol.solar)}, dust storm ${perSol.dust > 0 ? oneIn(perSol.dust) : 'out of season'}.`;
   }
 
   setTimeScale(scale: number): void {
@@ -811,6 +829,8 @@ export class Hud {
     if (mode) return this.actions.setMode(mode);
     const scenario = target.closest<HTMLElement>('[data-scenario]')?.dataset.scenario as 'clear' | 'dust' | 'solar' | undefined;
     if (scenario) return this.actions.setScenario(scenario);
+    const odds = target.closest<HTMLElement>('[data-odds]')?.dataset.odds as Odds | undefined;
+    if (odds) return this.actions.setOdds(odds);
     const layer = target.closest<HTMLElement>('[data-layer]')?.dataset.layer as LayerId | undefined;
     if (layer) return this.actions.setLayer(layer);
     const prompt = target.closest<HTMLElement>('[data-prompt]')?.dataset.prompt;

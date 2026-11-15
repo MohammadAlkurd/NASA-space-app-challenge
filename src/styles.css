@@ -170,7 +170,8 @@ kbd { display: inline-grid; place-items: center; min-width: 28px; height: 28px; 
 .about table.legs.safety td { white-space: normal; min-width: 150px; }
 .about table.legs.safety td:last-child { white-space: nowrap; }
 .groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-lg); }
-dl { display: grid; margin-top: var(--space-2xs); }
+dl { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: var(--space-2xs); }
+#t-season { white-space: normal; text-align: right; }
 dl div { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-xs); border-top: 1px solid var(--color-rule); padding: var(--space-2xs) 0; font-size: var(--text-sm); }
 dt { color: var(--color-muted); white-space: nowrap; }
 dd { font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -182,7 +183,8 @@ dd { font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; 
 .controls label b { color: var(--color-ink); font-weight: 500; font-variant-numeric: tabular-nums; }
 .controls .segmented button { background: var(--color-paper-3); }
 .controls .segmented button.active { background: var(--color-ink); }
-.controls .segmented, .controls > button { grid-column: 1 / -1; }
+.controls .segmented, .controls > button, .controls > p { grid-column: 1 / -1; }
+.controls > p { margin: 0; font-size: var(--text-sm); color: var(--color-muted); }
 .controls > button { justify-self: start; background: var(--color-paper-3); }
 input[type='range'] { width: 100%; accent-color: var(--color-accent); margin: 0; height: 18px; }
 .criteria { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xs); }

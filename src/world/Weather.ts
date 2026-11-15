@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { devilShape } from '../data/Events';
 import { DUST_COLOR } from './Sky';
 import type { SiteData } from './SiteData';
 
@@ -23,6 +24,8 @@ export class Weather {
   private readonly color = new THREE.Color();
   private readonly ahead = new THREE.Vector3();
   private devilLevel = 0;
+  /** Seconds left of a dust devil passing close to the crew. */
+  private passing = 0;
   private time = 0;
 
   constructor(private readonly site: SiteData) {
@@ -131,7 +134,8 @@ export class Weather {
           float lean = sin(uTime * 0.6 + aDevil * 1.7 + h * 2.5) * 9.0 * h;
           vec3 world = base + vec3(cos(angle) * radius + lean, h * ${DEVIL_HEIGHT.toFixed(1)}, sin(angle) * radius);
           vec4 view = viewMatrix * vec4(world, 1.0);
-          vAlpha = (1.0 - 0.75 * h) * smoothstep(0.0, 0.04, h);
+          // A near one is spread over more of the screen, so each grain is drawn denser to keep the column readable.
+          vAlpha = (1.0 - 0.75 * h) * smoothstep(0.0, 0.04, h) * (1.0 + 2.0 * smoothstep(400.0, 120.0, -view.z));
           gl_PointSize = clamp((2.5 + 6.0 * h) * uPixels / max(-view.z, 1.0), 1.5, 90.0);
           gl_Position = projectionMatrix * view;
         }
@@ -205,8 +209,8 @@ export class Weather {
     // Dust devils: gusty daytime, and not inside a storm, where nothing that far away can be seen.
     // Perseverance's weather station logged the most whirlwinds between 12:00 and 13:00 (Newman et al. 2022).
     // They build up and die away around that hour; the 09:00-17:00 window is our own shape, not a measured one.
-    const season = THREE.MathUtils.smoothstep(hour, 9, 12) * (1 - THREE.MathUtils.smoothstep(hour, 14, 17));
-    const wanted = windMs > 6.5 && daylight > 0.6 && storm < 0.3 ? season : 0;
+    this.passing = storm < 0.3 ? Math.max(0, this.passing - dt) : 0;
+    const wanted = this.passing > 0 ? 1 : windMs > 6.5 && daylight > 0.6 && storm < 0.3 ? devilShape(hour) : 0;
     this.devilLevel += (wanted - this.devilLevel) * Math.min(1, dt * 0.5);
     this.devils.visible = this.devilLevel > 0.02;
     if (!this.devils.visible) return;
@@ -216,8 +220,10 @@ export class Weather {
       if (base.y < -1e4 || away > 900 || Math.abs(base.x) > limit || Math.abs(base.z) > limit) {
         // Start a new one ahead of the camera so it is seen, at a different distance for each.
         camera.getWorldDirection(this.ahead);
-        const angle = Math.atan2(this.ahead.x, -this.ahead.z) + (Math.random() - 0.5) * 1.5;
-        const distance = 180 + 190 * i + 120 * Math.random();
+        // The one sent past the crew starts nearer and closer to the middle of the view.
+        const near = i === 0 && this.passing > 0;
+        const angle = Math.atan2(this.ahead.x, -this.ahead.z) + (Math.random() - 0.5) * (near ? 0.7 : 1.5);
+        const distance = near ? 120 : 180 + 190 * i + 120 * Math.random();
         base.x = THREE.MathUtils.clamp(traveller.x + Math.sin(angle) * distance, -limit, limit);
         base.z = THREE.MathUtils.clamp(traveller.z - Math.cos(angle) * distance, -limit, limit);
       }
@@ -228,6 +234,13 @@ export class Weather {
     this.devilMaterial.uniforms.uTime.value = this.time;
     this.devilMaterial.uniforms.uPixels.value = pixels;
     this.devilMaterial.uniforms.uOpacity.value = this.devilLevel;
+  }
+
+  /** Send one dust devil past the crew, starting about 120 m away. The far ones on the plain are scenery. */
+  passBy(): void {
+    // Marks the first one as gone, so the next frame starts it again, close and in view.
+    this.bases[0].y = -Infinity;
+    this.passing = 45;
   }
 
   dispose(): void {

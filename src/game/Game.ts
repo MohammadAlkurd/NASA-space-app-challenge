@@ -5,6 +5,7 @@ import { Loop } from '../core/Loop';
 import { createRenderer } from '../core/Renderer';
 import { assess, type Conditions, type Scenario } from '../data/Conditions';
 import { Environment, HOUR_SECONDS } from '../data/Environment';
+import { NaturalEvents, stormOdds, type Odds } from '../data/Events';
 import { Astronaut } from '../entities/Astronaut';
 import type { Explorer, TravelMode } from '../entities/Explorer';
 import { Rover } from '../entities/Rover';
@@ -44,6 +45,7 @@ const CAMP_DOSE_FACTOR = MODEL.shelterDose.value;
 /** On foot this close to the lander, the crew is in its safe zone, metres. */
 const SAFE_RANGE = MODEL.safeZone.value;
 const LIGHTS_KEY = 'mbe.lights';
+const ODDS_KEY = 'mbe.odds';
 const CAMP_TIME_SCALE = 600;
 /** Where the lander stands relative to the base marker, metres. */
 const LANDER_OFFSET = { x: 16, z: -14 };
@@ -108,6 +110,7 @@ export class Game {
   private destination: RoutePoint | null = null;
   private base: RoutePoint = { x: 0, z: 0 };
   private scenario: Scenario = 'clear';
+  private events = new NaturalEvents(false);
   private tau = 0.5;
   private conditions: Conditions | null = null;
   private drawPoints: RoutePoint[] = [];
@@ -162,23 +165,11 @@ export class Game {
       },
       setTool: (tool) => this.setTool(tool),
       setScenario: (scenario) => {
-        this.scenario = scenario;
-        this.conditions = assess(scenario, this.environment.at(this.hour), this.environment.spaceWeather);
-        this.hud.setScenario(scenario);
-        this.refreshSolarDay();
-        if (this.layer === 'solar') this.setLayer('solar');
-        // Dust slows travel, which changes the energy every route needs: plan the trip again for the new weather.
-        const chosen = this.routes[this.selected]?.kind;
-        if (this.following || !this.routes.length) this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
-        else if (this.tool === 'draw' && this.routes.length > 1) this.compareDrawing();
-        else if (this.tool === 'draw') this.refreshDrawing();
-        else if (this.destination) this.planTo(this.destination);
-        else this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
-        // Planning again starts on the first route: go back to the one that was picked.
-        const keep = this.routes.findIndex((route) => route.kind === chosen);
-        if (keep > 0 && keep !== this.selected) this.showRoutes(this.routes, keep);
-        if (scenario !== 'clear' && this.started) this.stormAlert(scenario);
+        // A hand-picked drill or clear sol replaces whatever weather arrived on its own.
+        this.events.clear();
+        this.applyScenario(scenario);
       },
+      setOdds: (odds) => this.setOdds(odds),
       selectRoute: (index) => this.selectRoute(index),
       go: () => this.go(),
       stop: () => this.stopFollowing(),
@@ -271,6 +262,9 @@ export class Game {
     this.hud.setLayer(this.layer);
     this.hud.setTraveller(this.traveller);
     this.hud.setTimeScale(this.timeScale);
+    this.events = new NaturalEvents(environment.season.dustSeason);
+    const saved = localStorage.getItem(ODDS_KEY);
+    this.setOdds(saved === 'off' || saved === 'fast' ? saved : 'real');
     this.hud.setView('chase');
     this.hud.setLoadStatus('');
     this.hud.setReady();
@@ -520,6 +514,53 @@ export class Game {
     if (routes.length && this.rig.mode === 'map' && this.tool === 'plan') this.frameRoutes();
     this.markers.showRoutes(routes, selected);
     this.hud.setRoutes(routes, selected, this.following, this.timings());
+  }
+
+  /** Switch the weather, by hand or because a storm arrived, and plan the trip again for it. */
+  private applyScenario(scenario: Scenario): void {
+    this.scenario = scenario;
+    this.conditions = assess(scenario, this.environment.at(this.hour), this.environment.spaceWeather);
+    this.hud.setScenario(scenario);
+    this.refreshSolarDay();
+    if (this.layer === 'solar') this.setLayer('solar');
+    // Dust slows travel, which changes the energy every route needs: plan the trip again for the new weather.
+    const chosen = this.routes[this.selected]?.kind;
+    if (this.following || !this.routes.length) this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
+    else if (this.tool === 'draw' && this.routes.length > 1) this.compareDrawing();
+    else if (this.tool === 'draw') this.refreshDrawing();
+    else if (this.destination) this.planTo(this.destination);
+    else this.hud.setRoutes(this.routes, this.selected, this.following, this.timings());
+    // Planning again starts on the first route: go back to the one that was picked.
+    const keep = this.routes.findIndex((route) => route.kind === chosen);
+    if (keep > 0 && keep !== this.selected) this.showRoutes(this.routes, keep);
+    if (scenario !== 'clear' && this.started) this.stormAlert(scenario);
+  }
+
+  private setOdds(odds: Odds): void {
+    this.events.odds = odds;
+    localStorage.setItem(ODDS_KEY, odds);
+    // Switching events off also ends a storm that arrived on its own.
+    if (odds === 'off' && this.events.active) {
+      this.events.clear();
+      this.applyScenario('clear');
+    }
+    this.hud.setOdds(odds, stormOdds(odds, this.environment.season.dustSeason));
+  }
+
+  /** Storms and whirlwinds that arrive on their own as the Mars clock runs. */
+  private stepEvents(stepH: number): void {
+    // A drill picked by hand holds until the crew ends it.
+    if (this.scenario !== 'clear' && !this.events.active) return;
+    const happened = this.events.step(stepH, this.hour);
+    if (happened.ended) {
+      this.applyScenario('clear');
+      this.hud.toast(`The ${happened.ended === 'solar' ? 'solar storm' : 'dust storm'} has passed.`);
+    }
+    if (happened.started) this.applyScenario(happened.started);
+    else if (happened.devil) {
+      this.weather.passBy();
+      this.hud.toast('A dust devil is passing close by.');
+    }
   }
 
   /** A storm drill: the parked rover is the shelter, so point the crew at it. */
@@ -1032,6 +1073,7 @@ export class Game {
     const explorer = this.active;
     const missionSeconds = dt * this.timeScale;
     this.hour += missionSeconds / HOUR_SECONDS;
+    if (this.started) this.stepEvents(missionSeconds / HOUR_SECONDS);
     if (this.hour >= 24) {
       this.hour %= 24;
       this.sol += 1;
@@ -1307,6 +1349,16 @@ export class Game {
         this.scenario = scenario;
         this.hud.setScenario(scenario);
       },
+      setOdds: (odds: Odds) => this.setOdds(odds),
+      /** Run the event clock on by this many Mars hours, stopping when a storm starts. Returns that storm, if any. */
+      rollEvents: (hours: number) => {
+        for (let h = 0; h < hours && !this.events.active; h += 0.25) {
+          this.sol += Math.floor((this.hour + 0.25) / 24);
+          this.hour = (this.hour + 0.25) % 24;
+          this.stepEvents(0.25);
+        }
+        return this.events.active;
+      },
       /** Turn the explorer to a compass bearing (degrees clockwise from north), e.g. towards the sun. */
       face: (bearingDeg: number, x = this.active.position.x, z = this.active.position.z) => {
         const r = (bearingDeg * Math.PI) / 180;
@@ -1336,7 +1388,7 @@ export class Game {
       hour: this.hour,
       sol: this.sol,
       sun: { elevation: this.environment.at(this.hour).sunElevationDeg, azimuth: this.environment.at(this.hour).sunAzimuthDeg },
-      weather: { tau: this.tau, storm: this.storm, fog: (this.scene.fog as THREE.FogExp2).density, dustDevils: this.weather.devilsActive },
+      weather: { tau: this.tau, storm: this.storm, fog: (this.scene.fog as THREE.FogExp2).density, dustDevils: this.weather.devilsActive, natural: this.events.active, odds: this.events.odds },
       doseTotal: this.doseTotal,
       suit: 1 - this.suitJ / SUIT_ENERGY_J,
       battery: 1 - this.energyWh / ROVER_BATTERY_WH,

@@ -8,7 +8,7 @@ Source: https://www.spaceappschallenge.org/2026/challenges/interplanetary-surviv
 | 2 | Data from multiple NASA science missions | Done | MRO (HiRISE), Odyssey (THEMIS), MGS (MOLA datum), MSL (RAD), Mars 2020 (MEDA, Navcam, traverse) | Sources panel |
 | 3 | At least three kinds of data (optical, thermal, spectral, topographic, geophysical, atmospheric, radiation, chemical) | Done: 5 kinds | optical, topographic, thermal, atmospheric, radiation | Sources panel table |
 | 4 | Help a human explorer plan and carry out a Marswalk safely | Done | Route planner + follow mode; `src/planning/Router.ts`, `src/game/Game.ts` | Click ground, pick route, Go |
-| 5 | Astronaut safety: radiation and space weather | Done | "What to do now" card + Safety guide from one rules list (`src/planning/Safety.ts`), also printed on the checklist and written to the GeoJSON/CSV exports; dose rate/trip dose, shelter layer, Low-radiation route, DONKI status | Card under the clock; press G; Stats > Solar storm / Dust storm drill; Radiation layer |
+| 5 | Astronaut safety: radiation and space weather | Done | "What to do now" card + Safety guide from one rules list (`src/planning/Safety.ts`), also printed on the checklist and written to the GeoJSON/CSV exports; dose rate/trip dose, shelter layer, Low-radiation route, DONKI status; solar storms, dust storms and dust devils that arrive on their own at measured rates (`src/data/Events.ts`) | Card under the clock; press G; Stats > Solar storm / Dust storm drill; Radiation layer |
 | 6 | Suit mobility; routes around obstacles | Done | Astronaut limits (0.9 m/s, 20° no-go) vs rover (2.0 m/s, 25°); ratings with reasons | Switch Astronaut/Rover, compare routes |
 | 7 | Route map to science objectives | Done | 9 Perseverance stops at Jezero, 10 Curiosity stops at Gale; Science-rich route | Click a blue stop, "Route here" |
 | 8 | Point-of-view imagery from NASA surface missions | Done | Navcam photo per stop with credit and link | Click a blue stop |
@@ -18,7 +18,7 @@ Source: https://www.spaceappschallenge.org/2026/challenges/interplanetary-surviv
 
 Extras beyond the page: draw-your-own route with live safety check and comparison against the planner,
 GeoJSON/CSV export, base-site scoring with explanations, time-of-day weather from a real MEDA sol.
-Also: set the base anywhere (a lander marks it), weather go/no-go with dust-storm and solar-storm drills, routes rated for
+Also: set the base anywhere (a lander marks it), weather go/no-go with dust-storm and solar-storm drills and the same storms arriving on their own at measured odds, routes rated for
 the hours they cover with a suggested leaving time, Mars clock tied to real travel speed, solar-power layer and panel
 output estimate, rover as a movable shelter to camp in, nearest-science-site photo with a minimap.
 

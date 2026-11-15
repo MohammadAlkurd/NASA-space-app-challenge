@@ -52,8 +52,13 @@ export const MODEL = {
   safeZone: c(30, 'm', 'ASSUMPTION', 'Radius around the lander where the crew can shelter in it and refill the suit', 'Ours'),
   stormDose: c(3, '×', 'MEASURED', 'Dose rate in a solar particle storm, relative to normal (measured 2 to 3; the planner uses 3)', 'Curiosity RAD, September 2017: Zeitlin et al. 2018, doi:10.1029/2018GL077760'),
   dustScaleHeight: c(11000, 'm', 'ASSUMPTION', 'Height the dust is taken to be mixed through, to turn the measured dust optical depth into how far you can see along the ground', 'Ours: the scale height of the Mars atmosphere (NASA Mars Fact Sheet, 11.1 km)'),
-  dustDevilPeak: c(1.15, '/h', 'MEASURED', 'Whirlwinds passing Perseverance per hour at the busiest time, 12:00 to 13:00 (over four per sol; about a quarter carry dust). The app draws them from 09:00 to 17:00 around that peak', 'Newman et al. 2022, doi:10.1126/sciadv.abn3783'),
+  dustDevilPeak: c(1.15, '/h', 'MEASURED', 'Whirlwinds passing Perseverance per hour at the busiest time, 12:00 to 13:00 (over four per sol). The app lets them arrive at random from 09:00 to 17:00, at this rate at the peak', 'Newman et al. 2022, doi:10.1126/sciadv.abn3783'),
   stormPeak: c(12, 'h', 'MEASURED', 'How long that storm stayed at its peak, after rising for several hours', 'Zeitlin et al. 2018'),
+  solarEventEvery: c(477, 'sols', 'MEASURED', 'Average wait between solar particle events that called for shelter. Curiosity recorded 16 events in the 4,295 sols from landing (August 2012) to September 2024; 9 of them kept the dose rate raised for 5.5 hours or longer, and the other 7 added almost no dose', 'Curiosity RAD: Löwe et al. 2025, arXiv:2502.02469, Table 1'),
+  solarEventLasts: c(21, 'h', 'MEASURED', 'Average time the dose rate stayed a quarter or more above normal in those 9 events', 'Löwe et al. 2025'),
+  dustStormEvery: c(3, 'Mars years', 'MEASURED', 'Average wait between planet-wide dust storms. They start in southern spring and summer, so the app only starts one in that half of the year (Curiosity saw one in its first 5.9 Mars years)', 'NASA, "The Fact and Fiction of Martian Dust Storms" (2015)'),
+  dustStormLasts: c(51, 'sols', 'MEASURED', 'How long the 2018 planet-wide storm kept the dust optical depth above 3 at Gale (sols 2082 to 2133)', 'Curiosity Mastcam images of the Sun (M. Lemmon), NASA PDS'),
+  dustDevilDusty: c(25, '%', 'MEASURED', 'Share of passing whirlwinds that carry dust and can be seen (about a quarter)', 'Newman et al. 2022'),
 } as const;
 
 const MOON_G = 1.62;
