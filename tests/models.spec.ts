@@ -1,0 +1,185 @@
+import { expect, test } from '@playwright/test';
+import {
+  MARS_G, MODEL, SUIT_ENERGY_J, marquezSpeed, pace, roverEnergyJ, suitSupplies, walkEnergyJ,
+} from '../src/planning/Models';
+import { LIMITS, type Conditions } from '../src/data/Conditions';
+import { FAST_ODDS, NaturalEvents, devilShape, stormOdds } from '../src/data/Events';
+import { advise, safetyRules, type SafetyState } from '../src/planning/Safety';
+
+// Checks of the planning formulas against the published numbers they come from. No browser needed.
+test.describe('planning models', () => {
+  test('walking speed follows the Marquez 2008 curve and is slower uphill than downhill', () => {
+    expect(marquezSpeed(0)).toBeCloseTo(1.6, 5);
+    expect(marquezSpeed(6)).toBeCloseTo(0.4, 5);
+    expect(marquezSpeed(-10)).toBeCloseTo(1.0, 5);
+    expect(marquezSpeed(15)).toBeCloseTo(0.049, 3);
+    expect(marquezSpeed(25)).toBe(0.05);
+    expect(marquezSpeed(-25)).toBe(0.05);
+    expect(marquezSpeed(5)).toBeLessThan(marquezSpeed(-5));
+    // The curve has no jumps where its pieces meet.
+    for (const edge of [-20, -10, 0, 6, 15]) expect(Math.abs(marquezSpeed(edge + 1e-6) - marquezSpeed(edge))).toBeLessThan(0.01);
+    expect(pace('astronaut', 0)).toBe(MODEL.walkPlanSpeed.value);
+    expect(pace('rover', 12)).toBe(MODEL.roverSpeed.value);
+  });
+
+  test('walking effort on flat ground is about 470 W (404 kcal/h) at the planned pace', () => {
+    const watts = walkEnergyJ(1, 0, 0.9) * 0.9;
+    expect(watts).toBeGreaterThan(460);
+    expect(watts).toBeLessThan(480);
+    // One Apollo backpack then lasts between 4 and 5 hours of steady walking.
+    const hours = SUIT_ENERGY_J / watts / 3600;
+    expect(hours).toBeGreaterThan(4);
+    expect(hours).toBeLessThan(5);
+  });
+
+  test('uphill costs more than level, and gentle downhill costs less', () => {
+    const level = walkEnergyJ(100, 0, 0.9);
+    expect(walkEnergyJ(100, 8, 0.9)).toBeGreaterThan(level);
+    expect(walkEnergyJ(100, -8, 0.9)).toBeLessThan(level);
+    expect(walkEnergyJ(100, -8, 0.9)).toBeGreaterThan(0);
+  });
+
+  test('effort model lands on the cautious side of NASA\'s 10 km walk-back test (944 kcal)', () => {
+    // Test conditions: 10 km at 3.9 mph in simulated Moon gravity, 121 kg suit; 80 kg subject is our assumption.
+    const kcal = walkEnergyJ(10_000, 0, 3.9 * 0.44704, 80 + 121, 1.62) / 4184;
+    const ratio = kcal / 944.2;
+    expect(ratio).toBeGreaterThan(1);
+    expect(ratio).toBeLessThan(1.4);
+  });
+
+  test('rover energy follows Carr 2001 and gives a plausible range', () => {
+    const perMetre = roverEnergyJ(1, 0);
+    const expected = 0.216 * MODEL.roverMass.value * (MARS_G / 1.62) + MODEL.roverElectronics.value / MODEL.roverSpeed.value;
+    expect(perMetre).toBeCloseTo(expected, 6);
+    const rangeKm = (MODEL.roverBattery.value * 3.6e6) / perMetre / 1000;
+    expect(rangeKm).toBeGreaterThan(30);
+    expect(rangeKm).toBeLessThan(50);
+    expect(roverEnergyJ(100, 10)).toBeGreaterThan(roverEnergyJ(100, -10));
+    expect(roverEnergyJ(100, -10)).toBeGreaterThan(roverEnergyJ(100, 0));
+  });
+
+  test('suit budget and oxygen rule match Apollo and the NASA walk-back test', () => {
+    // Apollo 15-17 backpack: 225 kcal/h lasts 8 h.
+    expect(SUIT_ENERGY_J / (225 * 4184) ).toBeCloseTo(8, 1);
+    // Walk-back test: 2374 BTU/h (2505 kJ/h) used 0.40 lb/h of oxygen.
+    const lbPerHour = (2505 * MODEL.oxygen.value) / 453.6;
+    expect(Math.abs(lbPerHour - 0.4) / 0.4).toBeLessThan(0.05);
+  });
+
+  test('oxygen and cooling water drain with effort and outlast the suit energy budget', () => {
+    expect(suitSupplies(0)).toEqual({ energy: 1, oxygen: 1, water: 1 });
+    const spent = suitSupplies(SUIT_ENERGY_J);
+    expect(spent.energy).toBeCloseTo(0, 6);
+    // Apollo 15-17 planned 8 h on one fill, so neither tank may run dry before the energy budget does.
+    expect(spent.oxygen).toBeGreaterThan(0);
+    expect(spent.oxygen).toBeLessThan(0.3);
+    expect(spent.water).toBeGreaterThan(0);
+    expect(spent.water).toBeLessThan(0.3);
+    // Oxygen charge scaled by pressure from the measured 472 g at 1020 psia.
+    expect(MODEL.oxygenTank.value).toBeCloseTo((472 * 1410) / 1020, 0);
+    // 11.5 lb of cooling water.
+    expect(MODEL.waterTank.value / 453.6).toBeCloseTo(11.5, 1);
+  });
+
+  test('a dust-slowed trip costs more energy over the same ground', () => {
+    const dust = 0.7;
+    expect(walkEnergyJ(1000, 0, 0.9 * dust)).toBeGreaterThan(walkEnergyJ(1000, 0, 0.9));
+    expect(roverEnergyJ(1000, 0, MODEL.roverSpeed.value * dust)).toBeGreaterThan(roverEnergyJ(1000, 0));
+  });
+
+  test('the safety card picks the most urgent rule, in the agreed order, and clears when nothing is wrong', () => {
+    const rules = safetyRules(8.59, 'Curiosity Mastcam, 2018 global dust storm');
+    expect(rules.map((r) => r.id)).toEqual(['solar', 'dust', 'shelter', 'walkback', 'supplies', 'dark', 'cold', 'gust', 'steep']);
+    // Every rule carries the labelled, sourced constants behind it.
+    for (const rule of rules) {
+      expect(rule.basis.length).toBeGreaterThan(0);
+      for (const b of rule.basis) expect(b.source.length).toBeGreaterThan(0);
+    }
+    const clear: Conditions = { scenario: 'clear', tau: 0.42, windMs: 4, speedFactor: 1, doseFactor: 1, solarWm2: 400, verdict: 'GO', reasons: [] };
+    const calm: SafetyState = {
+      conditions: clear, sunElevationDeg: 40, airTempC: -30, rover: false, sheltered: false,
+      shelterWalkS: 600, walkHomeJ: 0.05 * SUIT_ENERGY_J, suitUsedJ: 0, slopeDeg: 3,
+    };
+    expect(advise(rules, calm)).toBeNull();
+    // Everything wrong at once: the solar storm wins. Removing the worst problem each time walks down the list.
+    const all: SafetyState = {
+      ...calm,
+      conditions: { ...clear, scenario: 'dust', doseFactor: MODEL.stormDose.value, windMs: LIMITS.gust.value + 1 },
+      shelterWalkS: (MODEL.shelterWalk.value + 5) * 60, suitUsedJ: 0.9 * SUIT_ENERGY_J,
+      sunElevationDeg: LIMITS.darkSun.value - 1, airTempC: LIMITS.deepCold.value - 1, slopeDeg: MODEL.walkSlopeLimit.value,
+    };
+    expect(advise(rules, all)?.id).toBe('solar');
+    const noSolar = { ...all, conditions: { ...all.conditions, doseFactor: 1 } };
+    expect(advise(rules, noSolar)?.id).toBe('dust');
+    const noDust = { ...noSolar, conditions: { ...noSolar.conditions, scenario: 'clear' as const } };
+    expect(advise(rules, noDust)?.id).toBe('shelter');
+    const near = { ...noDust, shelterWalkS: 600 };
+    expect(advise(rules, near)?.id).toBe('supplies');
+    const full = { ...near, suitUsedJ: 0 };
+    expect(advise(rules, full)?.id).toBe('dark');
+    const day = { ...full, sunElevationDeg: 40 };
+    expect(advise(rules, day)?.id).toBe('cold');
+    const warm = { ...day, airTempC: -30 };
+    expect(advise(rules, warm)?.id).toBe('gust');
+    const still = { ...warm, conditions: { ...warm.conditions, windMs: 4 } };
+    expect(advise(rules, still)?.id).toBe('steep');
+    // The supplies rule fires exactly at the walk home plus the reserve.
+    const edge = (used: number) => advise(rules, { ...calm, suitUsedJ: used * SUIT_ENERGY_J })?.id;
+    expect(edge(1 - 0.05 - MODEL.marginal.value / 100 - 0.01)).toBeUndefined();
+    expect(edge(1 - 0.05 - MODEL.marginal.value / 100 + 0.01)).toBe('supplies');
+    // In the rover the walk-home rule replaces the on-foot ones.
+    expect(advise(rules, { ...calm, rover: true, walkHomeJ: 1.2 * SUIT_ENERGY_J })?.id).toBe('walkback');
+  });
+
+  test('storms and dust devils arrive on their own at the measured rates', () => {
+    // A fixed random sequence, so the counts are the same on every run.
+    let seed = 12345;
+    const random = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    const run = (dustSeason: boolean, odds: 'off' | 'real' | 'fast', sols: number) => {
+      const events = new NaturalEvents(dustSeason, random);
+      events.odds = odds;
+      const count = { solar: 0, dust: 0, devil: 0, solarH: 0, dustH: 0 };
+      let startedH = 0;
+      for (let step = 0; step < sols * 96; step += 1) {
+        const clockH = step * 0.25;
+        const happened = events.step(0.25, clockH % 24);
+        if (happened.started) {
+          count[happened.started] += 1;
+          startedH = clockH;
+        }
+        if (happened.ended) count[`${happened.ended}H`] += clockH - startedH;
+        if (happened.devil) count.devil += 1;
+      }
+      return count;
+    };
+
+    // Outside dust season (Jezero's weather sol) only solar storms and dust devils happen.
+    const sols = 200_000;
+    const summer = run(false, 'real', sols);
+    expect(summer.dust).toBe(0);
+    const solarExpected = sols / MODEL.solarEventEvery.value;
+    expect(summer.solar).toBeGreaterThan(solarExpected * 0.85);
+    expect(summer.solar).toBeLessThan(solarExpected * 1.15);
+    expect(summer.solarH / summer.solar).toBeCloseTo(MODEL.solarEventLasts.value, 0);
+    // About a quarter of the whirlwinds carry dust; the midday hour sees them at the measured rate.
+    expect(devilShape(12.5)).toBe(1);
+    expect(devilShape(8)).toBe(0);
+    expect(devilShape(18)).toBe(0);
+    const perSol = summer.devil / sols;
+    expect(perSol).toBeGreaterThan(1);
+    expect(perSol).toBeLessThan(MODEL.dustDevilPeak.value * (MODEL.dustDevilDusty.value / 100) * 8);
+
+    // In dust season (Gale's weather sol) a planet-wide storm starts about once in three Mars years.
+    expect(1 / stormOdds('real', true).dust).toBeCloseTo(MODEL.dustStormEvery.value * 668.6 / 2, 0);
+    const dusty = run(true, 'real', sols);
+    expect(dusty.dust).toBeGreaterThan(100);
+    expect(dusty.dustH / dusty.dust / 24).toBeCloseTo(MODEL.dustStormLasts.value, 0);
+
+    // The demo setting only multiplies the storm rates; off stops everything.
+    expect(stormOdds('fast', true).solar).toBeCloseTo(FAST_ODDS / MODEL.solarEventEvery.value, 6);
+    expect(run(true, 'off', 1000)).toEqual({ solar: 0, dust: 0, devil: 0, solarH: 0, dustH: 0 });
+  });
+});

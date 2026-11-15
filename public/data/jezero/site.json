@@ -1,0 +1,31 @@
+{
+ "id": "jezero",
+ "name": "Jezero Crater - Perseverance landing area",
+ "crs": "Mars 2000 sphere (R = 3396190 m), planetocentric latitude, east-positive longitude; elevation in metres relative to the MOLA areoid",
+ "marsRadius": 3396190.0,
+ "centerLat": 18.456441714778048,
+ "centerLon": 77.41414451243331,
+ "cosLat": 0.94856460739945,
+ "local": {
+  "sizeM": 5120.0,
+  "px": 2048,
+  "cellM": 2.5,
+  "minElev": -2593.0,
+  "maxElev": -2395.0
+ },
+ "regional": {
+  "sizeM": 20480.0,
+  "px": 1024,
+  "cellM": 20.0,
+  "minElev": -2665.0,
+  "maxElev": -1641.0
+ },
+ "credits": [
+  "Mars 2020 Terrain Relative Navigation HiRISE DTM mosaic (1 m) and orthomosaic (25 cm): USGS Astrogeology Science Center / NASA / JPL-Caltech / University of Arizona"
+ ],
+ "near": {
+  "tileM": 256.0,
+  "px": 1024,
+  "count": 20
+ }
+}

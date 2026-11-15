@@ -5,3 +5,6 @@ artifacts/
 *.log
 .DS_Store
 .cache/
+.venv/
+.hallmark/
+__pycache__/
