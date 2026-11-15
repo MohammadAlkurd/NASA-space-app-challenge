@@ -16,7 +16,7 @@ export type Tool = 'plan' | 'draw' | 'base';
 export interface Prompt {
   key: string;
   label: string;
-  action: 'interact' | 'camp' | 'lights';
+  action: 'interact' | 'camp' | 'lights' | 'site';
 }
 
 export interface Telemetry {
@@ -99,6 +99,9 @@ export interface HudActions {
   setTimeScale(scale: number): void;
   /** Enter or leave the rover (the E key). */
   interact(): void;
+  viewSite(): void;
+  /** Label and value pairs for a science stop's card. */
+  stopFacts(stop: Stop): [string, string][];
   /** Camp in the rover or break camp (the R key). */
   camp(): void;
   lights(): void;
@@ -184,7 +187,7 @@ export class Hud {
             <button id="speed" title="Time speed">×1</button>
           </div>
           <div id="t-ground" class="flag" hidden><b></b><span></span></div>
-          <button id="advice" class="flag" data-open="guide" title="What to do now. Opens the safety guide (G)"><b></b><span></span><kbd>G</kbd></button>
+          <button id="advice" class="flag" data-open="guide" title="What to do now. Opens the safety guide (H)"><b></b><span></span><kbd>H</kbd></button>
         </div>
 
         <div id="mode" class="segmented">
@@ -227,7 +230,7 @@ export class Hud {
             <div id="layers">
               <div id="layer-list" class="segmented"></div>
               <label class="check"><input id="traverse" type="checkbox" checked /> Rover path</label>
-              <label class="check"><input id="limits" type="checkbox" checked /> Limits</label>
+              <label class="check"><input id="limits" type="checkbox" /> Limits</label>
             </div>
           </div>
           <p id="legend" class="legend"></p>
@@ -281,8 +284,11 @@ export class Hud {
               <button data-odds="fast">Odds ×${FAST_ODDS}</button>
             </div>
             <p id="odds-note"></p>
-            <button data-open="guide">Safety guide</button>
-            <button data-open="about">Sources</button>
+            <div class="links">
+              <button data-mode="globe">Landing site</button>
+              <button data-open="guide">Safety guide</button>
+              <button data-open="about">Sources</button>
+            </div>
           </div>
         </div>
       </section>
@@ -438,7 +444,7 @@ export class Hud {
     this.renderGuide();
   }
 
-  /** The G key: open or close the safety guide. */
+  /** The H key: open or close the safety guide. */
   toggleGuide(): void {
     const guide = el(this.root, '#guide');
     guide.hidden = !guide.hidden;
@@ -455,15 +461,13 @@ export class Hud {
       <p class="hint">Listed most urgent first; the card shows the first one that applies. ASSUMPTION marks our own planning choices, not NASA limits.</p>`;
   }
 
-  /** Esc closes whatever is open; with nothing open it pauses on the Stats sheet. */
-  escape(): void {
-    const open = ['#guide', '#card', '#photo', '#about', '#checklist'].map((id) => el(this.root, id)).filter((sheet) => !sheet.hidden);
-    if (open.length) {
-      for (const sheet of open) sheet.hidden = true;
-      return;
-    }
-    const stats = el(this.root, '#stats');
-    stats.hidden = !stats.hidden;
+  /** Esc: close whatever is open; otherwise, with stats true, open the pause sheet. Returns false when it did nothing. */
+  escape(stats = true): boolean {
+    const open = ['#guide', '#card', '#photo', '#about', '#checklist', '#stats'].map((id) => el(this.root, id)).filter((sheet) => !sheet.hidden);
+    for (const sheet of open) sheet.hidden = true;
+    if (open.length) return true;
+    if (stats) el(this.root, '#stats').hidden = false;
+    return stats;
   }
 
   closeOverlays(): void {
@@ -652,6 +656,7 @@ export class Hud {
           ${photo ? `<small><a href="${photo.link}" target="_blank" rel="noopener">${escapeHtml(photo.credit)}</a></small>` : ''}
         </figure>
         <p>${escapeHtml(stop.why)}</p>
+        <dl>${this.actions.stopFacts(stop).map(([label, value]) => `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
         <div class="row"><button class="primary" data-card="route">Route here</button></div>
       </div>`;
     card.querySelector('[data-card="route"]')?.addEventListener('click', () => {
@@ -834,7 +839,7 @@ export class Hud {
     const layer = target.closest<HTMLElement>('[data-layer]')?.dataset.layer as LayerId | undefined;
     if (layer) return this.actions.setLayer(layer);
     const prompt = target.closest<HTMLElement>('[data-prompt]')?.dataset.prompt;
-    if (prompt) return prompt === 'camp' ? this.actions.camp() : prompt === 'lights' ? this.actions.lights() : this.actions.interact();
+    if (prompt) return prompt === 'camp' ? this.actions.camp() : prompt === 'lights' ? this.actions.lights() : prompt === 'site' ? this.actions.viewSite() : this.actions.interact();
     if (target.closest('[data-land]')) return this.actions.start();
     const site = target.closest<HTMLElement>('[data-site]')?.dataset.site;
     if (site) return this.actions.pickSite(site);

@@ -22,7 +22,7 @@ import { MODEL, SHELTER_WALK_S, SUIT_ENERGY_J, SUIT_WORK_S, WORK_RATE_W, gradeDe
 import { clock, timeRoute } from '../planning/Timeline';
 import { Hud, type Prompt, type Tool, type ViewId } from '../ui/Hud';
 import { Globe, SITES } from '../world/Globe';
-import { Markers, type Mission, type Stop } from '../world/Markers';
+import { Markers, STOP_RANGE, type Mission, type Stop } from '../world/Markers';
 import { Rocks } from '../world/Rocks';
 import { loadSite, type SiteData } from '../world/SiteData';
 import { DUST_COLOR, Sky, stormLevel } from '../world/Sky';
@@ -121,6 +121,7 @@ export class Game {
   private energyWh = 0;
   /** The landing-site picker is open before the first landing. */
   private picking = false;
+  private pickerShown = false;
   private readonly autoLand = new URLSearchParams(window.location.search).get('land') === '1';
   /** The landing site whose terrain this page loaded: ?site=gale, Jezero by default. */
   private readonly homeSite = SITES.find((s) => s.id && s.id === new URLSearchParams(window.location.search).get('site')) ?? SITES[0];
@@ -188,6 +189,8 @@ export class Game {
       setBaseHere: () => this.lastBase && this.setBase(this.lastBase),
       returnToBase: () => this.planTo(this.base),
       interact: () => this.interact(),
+      viewSite: () => this.viewSite(),
+      stopFacts: (stop) => this.stopFacts(stop),
       lights: () => this.toggleLights(),
       camp: () => this.toggleCamp(),
       pickSite: (name) => this.selectSite(name),
@@ -299,10 +302,10 @@ export class Game {
     // First the landing site is picked on the globe; "Land here" comes back through this.
     if (!this.started && !this.picking) {
       this.picking = true;
-      this.hud.showPanels();
-      this.hud.showGlobe(this.globe.site);
+      this.globe.showAll();
       return;
     }
+    if (!this.globe.revealed) return;
     const chosen = this.globe.site;
     if (!chosen.id) return;
     // Each site's terrain is loaded with the page, so another site means a fresh landing there.
@@ -641,6 +644,32 @@ export class Game {
     else if (this.roverDistance() <= BOARD_RANGE) this.board(false);
   }
 
+  /** The science stop whose ground circle the traveller is inside, if any. */
+  private stopHere(): Stop | null {
+    const { x, z } = this.active.position;
+    return this.markers.nearestStop(x, z, STOP_RANGE);
+  }
+
+  /** The V key, inside a science stop's circle: open its photo, facts and numbers. */
+  private viewSite(): void {
+    if (!this.started || this.globe || this.transfer || this.rig.mode === 'map') return;
+    const stop = this.stopHere();
+    if (stop) this.hud.showStop(stop);
+  }
+
+  /** The numbers shown on a science stop's card: where it is and what standing there costs right now. */
+  private stopFacts(stop: Stop): [string, string][] {
+    const cell = this.analysis.index(stop.x, stop.z);
+    const walkS = this.tripContext().contingency.slowS[cell];
+    return [
+      ['Mission rover here', `sol ${stop.sol}`],
+      ['Elevation', `${stop.elev.toFixed(0)} m`],
+      ['Slope', `${this.analysis.effectiveSlope(cell).toFixed(0)}°`],
+      ['Dose rate now', `${(doseRate(this.analysis.skyView[cell]) * (this.conditions?.doseFactor ?? 1)).toFixed(1)} µSv/h`],
+      ['Walk to shelter', Number.isFinite(walkS) ? formatDuration(walkS) : 'cut off'],
+    ];
+  }
+
   /** The R key, inside the rover: camp, or break camp. */
   private toggleCamp(): void {
     if (!this.started || this.globe || this.traveller !== 'rover') return;
@@ -927,9 +956,7 @@ export class Game {
       const end = route.points[route.points.length - 1];
       explorer.follow(end.x, end.z, explorer.heading, 0, dt);
       this.stopFollowing();
-      const stop = this.markers.nearestStop(end.x, end.z, 30);
-      if (stop) this.hud.showStop(stop);
-      else this.hud.toast('You have arrived.');
+      this.hud.toast(this.markers.nearestStop(end.x, end.z, STOP_RANGE) ? 'You have arrived. Press V for the site.' : 'You have arrived.');
       return;
     }
     let k = 1;
@@ -969,6 +996,12 @@ export class Game {
     this.frame += 1;
     if (this.globe) {
       this.globe.update();
+      // The site picker opens once the camera has pulled back from the title to the whole planet.
+      if (this.picking && !this.pickerShown && this.globe.revealed && !this.globe.diving && !this.autoLand) {
+        this.pickerShown = true;
+        this.hud.showPanels();
+        this.hud.showGlobe(this.globe.site);
+      }
       // Fade to dust over the last part of the dive.
       // And clear from dust on the way up from the surface.
       if (this.fade) this.fade.style.opacity = String(Math.max(THREE.MathUtils.smoothstep(this.globe.progress, 0.72, 0.98), 1 - THREE.MathUtils.smoothstep(this.globe.rising, 0, 0.35)));
@@ -982,12 +1015,17 @@ export class Game {
     const explorer = this.active;
 
     const paused = this.started && this.hud.paused;
-    if (this.input.consume('Escape') && this.started) this.hud.escape();
-    if (this.input.consume('KeyG') && this.started) this.hud.toggleGuide();
+    if (this.input.consume('Escape') && this.started) {
+      // In Plan, Esc closes an open sheet, else goes back to Explore; in Explore it pauses on Stats.
+      const planning = this.rig.mode === 'map';
+      if (!this.hud.escape(!planning) && planning) this.chooseView(this.groundMode);
+    }
+    if (this.input.consume('KeyH') && this.started) this.hud.toggleGuide();
     if (this.started && !paused) {
       if (this.input.consume('KeyC')) this.setCamera(this.rig.mode === 'first' ? 'chase' : 'first');
       if (this.input.consume('KeyM')) this.setCamera(this.rig.mode === 'map' ? this.groundMode : 'map');
       if (this.input.consume('KeyE')) this.interact();
+      if (this.input.consume('KeyV')) this.viewSite();
       if (this.input.consume('KeyR')) this.toggleCamp();
       if (this.input.consume('KeyF')) this.toggleLights();
       const manual = this.input.throttle !== 0 || this.input.steer !== 0;
@@ -1047,7 +1085,8 @@ export class Game {
       this.respawnTimer -= real;
       if (this.respawnTimer <= 0 && this.fade) this.fade.style.opacity = '0';
     }
-    this.terrain.update(this.rig.mode === 'map' ? this.rig.mapCenter : this.camera.position);
+    const fromAbove = this.rig.mode === 'map';
+    this.terrain.update(fromAbove ? this.rig.mapCenter : this.camera.position, !fromAbove);
     this.sky.update(this.camera.position, target);
     this.markers.update(this.camera, this.rig.mode === 'map', explorer.position, explorer.heading);
     this.weather.update(dt, this.camera, explorer.position, this.conditions.windMs, weather.windFromDeg, this.hour, storm, daylight, this.renderer.domElement.clientHeight, mapHeight);
@@ -1157,6 +1196,7 @@ export class Game {
       else if (away <= BOARD_RANGE) prompts.push({ key: 'E', label: 'Enter rover', action: 'interact' });
       // The lights prompt shows once it is getting dark, or while a light is on.
       if (dark || lit) prompts.push({ key: 'F', label: lit ? 'Lights off' : 'Lights', action: 'lights' });
+      if (this.stopHere()) prompts.push({ key: 'V', label: 'Site info', action: 'site' });
     }
     this.hud.setTelemetry({
       panelW: this.analysis.solarAt(cell, sun) * PANEL_W_PER_WM2,

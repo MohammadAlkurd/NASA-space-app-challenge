@@ -45,6 +45,10 @@ const LABEL_SIZE = 0.019;
 const LABEL_RANGE = 500;
 /** Lines follow the ground at this spacing so hills hide them correctly, metres. */
 const LINE_STEP = 3;
+/** Science stops read a little larger than the other markers. */
+const STOP_SCALE = 1.6;
+/** Radius of the ground circle around a science stop, metres: inside it the site's card can be opened. */
+export const STOP_RANGE = 20;
 
 function sprite(canvas: HTMLCanvasElement, height: number): THREE.Sprite {
   const texture = new THREE.CanvasTexture(canvas);
@@ -56,7 +60,7 @@ function sprite(canvas: HTMLCanvasElement, height: number): THREE.Sprite {
 }
 
 /** A small flat symbol, the same size on screen at any distance. */
-function glyph(shape: Shape, color: string): THREE.Sprite {
+function glyph(shape: Shape, color: string, scale = 1): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 64;
   canvas.height = 64;
@@ -91,11 +95,11 @@ function glyph(shape: Shape, color: string): THREE.Sprite {
     context.fillStyle = color;
     context.fill();
   }
-  return sprite(canvas, GLYPH_SIZE);
+  return sprite(canvas, GLYPH_SIZE * scale);
 }
 
 /** A plain name beside a glyph: no box, just outlined text. */
-function nameTag(text: string): THREE.Sprite {
+function nameTag(text: string, scale = 1): THREE.Sprite {
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d')!;
   const font = '500 34px "Mona Sans Variable", system-ui, sans-serif';
@@ -110,9 +114,9 @@ function nameTag(text: string): THREE.Sprite {
   context.strokeText(text, 8, 30);
   context.fillStyle = '#eaf0f8';
   context.fillText(text, 8, 30);
-  const tag = sprite(canvas, LABEL_SIZE);
+  const tag = sprite(canvas, LABEL_SIZE * scale);
   // Sits to the right of the glyph, clear of it.
-  tag.center.set(-(GLYPH_SIZE * 0.75) / tag.scale.x, 0.5);
+  tag.center.set(-(GLYPH_SIZE * scale * 0.75) / tag.scale.x, 0.5);
   return tag;
 }
 
@@ -121,7 +125,7 @@ export class Markers {
   readonly group = new THREE.Group();
   /** Switches for the mission rover's path and the walk-back limit lines. */
   showTraverse = true;
-  showLimits = true;
+  showLimits = false;
   private readonly traverse = new THREE.Group();
   private readonly limits = new THREE.Group();
   private readonly safeZone = new THREE.Group();
@@ -129,6 +133,7 @@ export class Markers {
   /** The routes not picked: shown on the map only. */
   private readonly others = new THREE.Group();
   private readonly stops = new THREE.Group();
+  private readonly stopRings = new THREE.Group();
   private readonly pins = new THREE.Group();
   private readonly lineMaterials: LineMaterial[] = [];
   private readonly destination: THREE.Group;
@@ -137,14 +142,15 @@ export class Markers {
   private mapView: boolean | null = null;
 
   constructor(private readonly site: SiteData, readonly mission: Mission) {
-    this.group.add(this.traverse, this.limits, this.safeZone, this.others, this.routes, this.stops, this.pins);
+    this.group.add(this.traverse, this.limits, this.safeZone, this.stopRings, this.others, this.routes, this.stops, this.pins);
     for (const path of mission.traverse.paths) {
       this.traverse.add(this.line(path.map(([x, z]) => ({ x, z })), () => '#7fd8ff', 1.5, 0.75));
     }
     for (const stop of mission.stops) {
-      const mark = this.mark('diamond', '#74c7f4', stop.name);
+      const mark = this.mark('diamond', '#74c7f4', stop.name, STOP_SCALE);
       mark.position.set(stop.x, this.site.groundAt(stop.x, stop.z) + 2, stop.z);
       this.stops.add(mark);
+      this.stopRings.add(this.ring(stop, STOP_RANGE, '#74c7f4'));
     }
     // "You are here" arrow for the map view.
     const arrow = new THREE.Shape();
@@ -217,12 +223,17 @@ export class Markers {
   /** Thin ring on the ground marking the lander's safe zone. */
   setSafeZone(center: RoutePoint, radius: number): void {
     this.clear(this.safeZone);
+    this.safeZone.add(this.ring(center, radius, '#5ee6c8'));
+    this.applyView();
+  }
+
+  /** A thin circle laid on the ground. */
+  private ring(center: RoutePoint, radius: number, color: string): Line2 {
     const points: RoutePoint[] = [];
     for (let k = 0; k <= 72; k += 1) points.push({ x: center.x + Math.cos((k / 36) * Math.PI) * radius, z: center.z + Math.sin((k / 36) * Math.PI) * radius });
-    const ring = this.line(points, () => '#5ee6c8', 1.5, 0.75);
+    const ring = this.line(points, () => color, 1.5, 0.75);
     ring.renderOrder = 9;
-    this.safeZone.add(ring);
-    this.applyView();
+    return ring;
   }
 
   setBase(point: RoutePoint): void {
@@ -328,11 +339,11 @@ export class Markers {
   }
 
   /** A glyph with an optional name beside it. */
-  private mark(shape: Shape, color: string, name = ''): THREE.Group {
+  private mark(shape: Shape, color: string, name = '', scale = 1): THREE.Group {
     const group = new THREE.Group();
-    group.add(glyph(shape, color));
+    group.add(glyph(shape, color, scale));
     if (name) {
-      const tag = nameTag(name);
+      const tag = nameTag(name, scale);
       group.add(tag);
       group.userData.tag = tag;
     }

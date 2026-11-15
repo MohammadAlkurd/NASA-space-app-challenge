@@ -6,17 +6,24 @@ export const STORM_COLOR = new THREE.Color('#b08055');
 // Daytime: butterscotch at the horizon, darker overhead (Viking, Pathfinder and rover colour-calibrated images).
 const DAY_HORIZON = new THREE.Color('#d9b48c');
 const DAY_ZENITH = new THREE.Color('#9c7a5e');
-// Sunset and sunrise: the sky away from the sun goes dull red-brown while the sky around it turns blue
-// (NASA PIA19400, Curiosity sol 956, Gale Crater).
-const DUSK_HORIZON = new THREE.Color('#8a6c5c');
-const DUSK_ZENITH = new THREE.Color('#4c403c');
-const DUSK_FOG = new THREE.Color('#8f7464');
+// Sunset: the sky away from the sun goes dull red-brown while the sky around it turns blue
+// (NASA PIA19400, Curiosity sol 956, Gale Crater). The afternoon air carries the dust the day lifted.
+const DUSK_HORIZON = new THREE.Color('#8f6a52');
+const DUSK_ZENITH = new THREE.Color('#4c3d36');
+const DUSK_FOG = new THREE.Color('#94705a');
+// Sunrise: thin water-ice haze and bluish clouds form overnight and burn off after dawn, so the morning sky
+// is paler and cooler and the glow around the sun is whiter and wider (Mars Pathfinder predawn images,
+// Smith et al. 1997; morning ice-haze opacity up to 0.14 in blue light, Smith and Lemmon 1999).
+const DAWN_HORIZON = new THREE.Color('#948a92');
+const DAWN_ZENITH = new THREE.Color('#444858');
+const DAWN_FOG = new THREE.Color('#9a9096');
 const NIGHT_HORIZON = new THREE.Color('#0b0e16');
 const NIGHT_ZENITH = new THREE.Color('#04060b');
 const SUN_DAY = new THREE.Color('#fff0dc');
 const SUN_LOW = new THREE.Color('#dfe6f2');
 const AMBIENT_DAY = new THREE.Color('#e2c3a2');
-const AMBIENT_DUSK = new THREE.Color('#b3a3a6');
+const AMBIENT_DUSK = new THREE.Color('#b8a49c');
+const AMBIENT_DAWN = new THREE.Color('#a9a9bc');
 const AMBIENT_MURK = new THREE.Color('#c79a70');
 const AMBIENT_NIGHT = new THREE.Color('#7f8fb0');
 // Forward scattering by dust, in linear light: warm and broad by day, blue when the sun is low.
@@ -24,6 +31,8 @@ const GLOW_DAY = new THREE.Color().setRGB(0.30, 0.27, 0.24);
 const GLOW_LOW = new THREE.Color().setRGB(0.13, 0.26, 0.5);
 const HALO_DAY = new THREE.Color().setRGB(0.55, 0.62, 0.72);
 const HALO_LOW = new THREE.Color().setRGB(0.4, 0.6, 1.0);
+const GLOW_DAWN = new THREE.Color().setRGB(0.26, 0.32, 0.44);
+const HALO_DAWN = new THREE.Color().setRGB(0.62, 0.72, 0.95);
 const CLOUD = new THREE.Color().setRGB(0.8, 0.86, 1.0);
 
 const { smoothstep } = THREE.MathUtils;
@@ -57,6 +66,7 @@ export class Sky {
   private readonly halo = new THREE.Color();
   private readonly cloud = new THREE.Color();
   private readonly scratch = new THREE.Color();
+  private readonly blend = new THREE.Color();
   private readonly dome: THREE.Mesh;
   private readonly material: THREE.ShaderMaterial;
 
@@ -185,11 +195,13 @@ export class Sky {
     const storm = stormLevel(tau);
     // 1 with the sun on or under the horizon, 0 once it is well up.
     const low = 1 - smoothstep(elevationDeg, 2, 16);
+    // 1 with the sun in the east (morning), 0 with it in the west. It flips at midnight and noon, when low is 0 or the sky is dark.
+    const dawn = smoothstep(Math.sin(azimuth), -0.3, 0.3);
     // Dust high in the air keeps scattering sunlight long after sunset, so a dim twilight lingers.
     const daylight = 0.75 * smoothstep(elevationDeg, -4, 10) + 0.25 * smoothstep(elevationDeg, -16, 0);
 
-    this.horizon.copy(DAY_HORIZON).lerp(DUSK_HORIZON, low);
-    this.zenith.copy(DAY_ZENITH).lerp(DUSK_ZENITH, low);
+    this.horizon.copy(DAY_HORIZON).lerp(this.blend.copy(DUSK_HORIZON).lerp(DAWN_HORIZON, dawn), low);
+    this.zenith.copy(DAY_ZENITH).lerp(this.blend.copy(DUSK_ZENITH).lerp(DAWN_ZENITH, dawn), low);
     // More dust: less contrast between horizon and zenith, and a browner sky.
     this.scratch.copy(STORM_COLOR).multiplyScalar(1 - 0.35 * low);
     this.zenith.lerp(this.horizon, 0.6 * dust).lerp(this.scratch, dust);
@@ -197,26 +209,26 @@ export class Sky {
     this.horizon.multiplyScalar(daylight).lerp(NIGHT_HORIZON, 1 - daylight);
     this.zenith.multiplyScalar(daylight).lerp(NIGHT_ZENITH, 1 - daylight);
 
-    this.glow.copy(GLOW_DAY).lerp(GLOW_LOW, low).multiplyScalar(smoothstep(elevationDeg, -14, -2) * (1 - 0.85 * dust));
-    this.halo.copy(HALO_DAY).lerp(HALO_LOW, low).multiplyScalar(smoothstep(elevationDeg, -8, 0) * (1 - dust));
+    this.glow.copy(GLOW_DAY).lerp(this.blend.copy(GLOW_LOW).lerp(GLOW_DAWN, dawn), low).multiplyScalar(smoothstep(elevationDeg, -14, -2) * (1 - 0.85 * dust));
+    this.halo.copy(HALO_DAY).lerp(this.blend.copy(HALO_LOW).lerp(HALO_DAWN, dawn), low).multiplyScalar(smoothstep(elevationDeg, -8, 0) * (1 - dust));
     // The disc fades as its light crosses more dust near the horizon.
     const path = 1 / Math.max(Math.sin(THREE.MathUtils.degToRad(elevationDeg)), 0.08) - 1;
     const uniforms = this.material.uniforms;
     uniforms.uDisc.value = (1 - dust) ** 2 * Math.exp(-0.15 * tau * path) * smoothstep(elevationDeg, -1.2, -0.2);
-    // By day the dust glow is broad; at sunset the blue is a fan some 20 degrees wide around the sun.
-    uniforms.uGlowPower.value = 6 + 18 * low;
+    // By day the dust glow is broad; at sunset the blue is a fan some 20 degrees wide around the sun. Morning ice haze spreads it wider.
+    uniforms.uGlowPower.value = 6 + (18 - 9 * dawn) * low;
     uniforms.uStars.value = 1 - smoothstep(elevationDeg, -14, -5);
     uniforms.uTau.value = tau;
-    uniforms.uClouds.value = 0.4 * clouds * (1 - dust);
+    uniforms.uClouds.value = (0.4 * clouds + 0.2 * low * dawn) * (1 - dust);
     uniforms.uTime.value += dt;
     this.cloud.copy(CLOUD).multiplyScalar(0.05 + 0.95 * daylight);
 
     this.sun.color.copy(SUN_DAY).lerp(SUN_LOW, low);
     this.sun.intensity = (1.2 + 2.4 * this.sunDirection.y) * smoothstep(elevationDeg, -3, 6) * (1 - 0.9 * dust);
-    this.ambient.color.copy(AMBIENT_DAY).lerp(AMBIENT_DUSK, low).lerp(AMBIENT_MURK, dust).lerp(AMBIENT_NIGHT, 1 - daylight);
+    this.ambient.color.copy(AMBIENT_DAY).lerp(this.blend.copy(AMBIENT_DUSK).lerp(AMBIENT_DAWN, dawn), low).lerp(AMBIENT_MURK, dust).lerp(AMBIENT_NIGHT, 1 - daylight);
     this.ambient.intensity = 1.15 * (0.3 + 0.7 * daylight) * (1 - 0.25 * dust);
 
-    this.fog.copy(DUST_COLOR).lerp(DUSK_FOG, low).lerp(this.scratch, Math.max(dust, storm)).multiplyScalar(0.04 + 0.96 * daylight);
+    this.fog.copy(DUST_COLOR).lerp(this.blend.copy(DUSK_FOG).lerp(DAWN_FOG, dawn), low).lerp(this.scratch, Math.max(dust, storm)).multiplyScalar(0.04 + 0.96 * daylight);
     uniforms.uStorm.value = storm;
     uniforms.uStormColor.value.copy(this.fog).convertLinearToSRGB();
     return daylight;

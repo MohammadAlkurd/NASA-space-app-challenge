@@ -22,5 +22,10 @@
  },
  "credits": [
   "Mars 2020 Terrain Relative Navigation HiRISE DTM mosaic (1 m) and orthomosaic (25 cm): USGS Astrogeology Science Center / NASA / JPL-Caltech / University of Arizona"
- ]
+ ],
+ "near": {
+  "tileM": 256.0,
+  "px": 1024,
+  "count": 20
+ }
 }

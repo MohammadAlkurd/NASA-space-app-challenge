@@ -6,12 +6,15 @@ import { Explorer, PROFILES } from './Explorer';
 /** A camera looks down -Z; the lamp rig points down +Z. */
 const FLIP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 const EYE = 1.72;
-/** Arms hang slightly forward at rest, as a pressurised suit holds them. */
-const ARM_REST = 0.5;
+const SIDEWAYS = new THREE.Vector3(1, 0, 0);
+const turn = new THREE.Quaternion();
+type Bone = 'hips' | 'thighL' | 'shinL' | 'thighR' | 'shinR' | 'armL' | 'armR' | 'foreL' | 'foreR';
+const BONES: Bone[] = ['hips', 'thighL', 'shinL', 'thighR', 'shinR', 'armL', 'armR', 'foreL', 'foreR'];
 
 /**
  * Suited crew member on foot. The model is NASA's Mark III planetary suit (NASA 3D Resources),
- * reduced for the web, with a few bones added so the legs and arms swing while walking.
+ * reduced for the web, with a few bones added so the legs and arms swing while walking. The model's arm bones
+ * already hold the resting pose (arms hanging at the sides, elbows a little bent); walking swings them from there.
  */
 export class Astronaut extends Explorer {
   readonly group = new THREE.Group();
@@ -20,7 +23,8 @@ export class Astronaut extends Explorer {
   readonly lights = new THREE.Group();
   private readonly beam = new THREE.SpotLight(0xeaf4ff, 0, 32, 0.6, 0.7, 1.6);
   private readonly lamp: THREE.MeshStandardMaterial;
-  private readonly bones: Record<'hips' | 'thighL' | 'shinL' | 'thighR' | 'shinR' | 'armL' | 'armR', THREE.Object3D>;
+  private readonly bones: Record<Bone, THREE.Object3D>;
+  private readonly rest: Record<Bone, THREE.Quaternion>;
   private readonly hipsY: number;
   private stride = 0;
 
@@ -36,9 +40,8 @@ export class Astronaut extends Explorer {
       if (!node) throw new Error(`astronaut model has no "${name}" bone`);
       return node;
     };
-    this.bones = {
-      hips: bone('hips'), thighL: bone('thighL'), shinL: bone('shinL'), thighR: bone('thighR'), shinR: bone('shinR'), armL: bone('armL'), armR: bone('armR'),
-    };
+    this.bones = Object.fromEntries(BONES.map((name) => [name, bone(name)])) as Record<Bone, THREE.Object3D>;
+    this.rest = Object.fromEntries(BONES.map((name) => [name, this.bones[name].quaternion.clone()])) as Record<Bone, THREE.Quaternion>;
     this.hipsY = this.bones.hips.position.y;
     this.lamp = materialNamed(model, 'lamp')!;
     this.lamp.emissive.set(0xeaf4ff);
@@ -88,11 +91,19 @@ export class Astronaut extends Explorer {
     this.eye.set(this.position.x, this.position.y + EYE, this.position.z);
   }
 
+  /** Turn an arm bone fore and aft from its resting pose. */
+  private swing(name: Bone, angle: number): void {
+    this.bones[name].quaternion.copy(this.rest[name]).premultiply(turn.setFromAxisAngle(SIDEWAYS, angle));
+  }
+
   /** Walk cycle from -1 to 1: thighs and arms swing in opposition, the trailing knee bends, the body bobs. */
   private pose(k: number): void {
     const b = this.bones;
-    b.armL.rotation.x = ARM_REST + 0.35 * k;
-    b.armR.rotation.x = ARM_REST - 0.35 * k;
+    this.swing('armL', 0.35 * k);
+    this.swing('armR', -0.35 * k);
+    // The elbow closes a little as its arm comes forward.
+    this.swing('foreL', -0.3 * Math.max(0, -k));
+    this.swing('foreR', -0.3 * Math.max(0, k));
     b.thighL.rotation.x = -0.45 * k;
     b.thighR.rotation.x = 0.45 * k;
     b.shinL.rotation.x = 0.5 * Math.max(0, -k);

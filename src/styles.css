@@ -186,6 +186,8 @@ dd { font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; 
 .controls .segmented, .controls > button, .controls > p { grid-column: 1 / -1; }
 .controls > p { margin: 0; font-size: var(--text-sm); color: var(--color-muted); }
 .controls > button { justify-self: start; background: var(--color-paper-3); }
+.controls .links { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.controls .links button { background: var(--color-paper-3); }
 input[type='range'] { width: 100%; accent-color: var(--color-accent); margin: 0; height: 18px; }
 .criteria { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xs); }
 .criteria li { display: grid; grid-template-columns: 150px minmax(0, 1fr) 32px; align-items: center; gap: var(--space-sm); font-size: var(--text-sm); }

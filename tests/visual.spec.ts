@@ -50,8 +50,11 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   expect(await canvasIsNonBlank(page)).toMatchObject({ ok: true });
 
   // Start: pick the landing site on the globe, then dive to the planning map.
+  // The title shows the planet without the site list, until Start pulls the camera back.
+  await expect(page.locator('#start h1')).toBeVisible();
+  await expect(page.locator('#sites .tiles .shot')).toHaveCount(0);
   await page.click('#start-button');
-  await expect(page.locator('#sites .tiles .shot')).toHaveCount(9);
+  await expect(page.locator('#sites .tiles .shot')).toHaveCount(9, { timeout: 60_000 });
   await page.click('#sites [data-land]');
   await page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__?.started === true, null, { timeout: 60_000 });
   await expect(page.locator('#ui')).toHaveAttribute('data-mode', 'plan');
@@ -63,6 +66,12 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await expect(page.locator('#t-air')).toContainText('°C');
   await expect(page.locator('#t-dose-rate')).toContainText('µSv/h');
   await page.click('#stats [data-close]');
+  await page.click('#mode [data-mode="plan"]');
+  // Esc in Plan goes back to Explore.
+  await expect(page.locator('#ui')).toHaveAttribute('data-mode', 'plan');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#ui')).toHaveAttribute('data-mode', 'explore');
+  await expect(page.locator('#stats')).toBeHidden();
   await page.click('#mode [data-mode="plan"]');
 
   // The Mars clock runs on its own, with no input.
@@ -195,6 +204,12 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   await page.click('#about-close');
 
   await page.screenshot({ path: testInfo.outputPath('play.png') });
+
+  // The Esc menu leads back to the globe to pick another landing site.
+  if (await page.locator('#stats').isHidden()) await page.keyboard.press('Escape');
+  await page.click('#stats [data-mode="globe"]');
+  await expect(page.locator('#stats')).toBeHidden();
+  await expect(page.locator('#sites .tiles .shot')).toHaveCount(9);
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
@@ -210,7 +225,7 @@ test('lands at Gale from the globe and plans a walk to a Curiosity stop', async 
   await page.goto('./');
   await expect(page.locator('#start-button')).toBeEnabled({ timeout: 120_000 });
   await page.click('#start-button');
-  await page.click('#sites [data-site^="Gale"]');
+  await page.click('#sites [data-site^="Gale"]', { timeout: 60_000 });
   await page.click('#sites [data-land]');
   // Another site's terrain loads with a fresh page, which then lands by itself.
   await page.waitForURL(/site=gale/);
@@ -310,15 +325,15 @@ test('the What to do now card follows the storm drills and opens the safety guid
   await expect(card.locator('span')).toContainText('Dust storm: dust τ', { timeout: 30_000 });
   await expect(card.locator('span')).not.toContainText('Solar');
 
-  // G opens the guide with the active rule marked; the Mars clock stands still while it is open.
-  await page.keyboard.press('KeyG');
+  // H opens the guide with the active rule marked; the Mars clock stands still while it is open.
+  await page.keyboard.press('KeyH');
   await expect(page.locator('#guide')).toBeVisible();
   await expect(page.locator('#guide .rule[data-rule]')).toHaveCount(9);
   await expect(page.locator('#guide .rule.active h3')).toContainText('Dust storm');
   const before = await page.locator('#t-clock').textContent();
   await page.waitForTimeout(3000);
   expect(await page.locator('#t-clock').textContent()).toBe(before);
-  await page.keyboard.press('KeyG');
+  await page.keyboard.press('KeyH');
   await expect(page.locator('#guide')).toBeHidden();
 
   // Clicking the card opens it too; back on a clear sol the card clears.
@@ -328,6 +343,25 @@ test('the What to do now card follows the storm drills and opens the safety guid
   await expect(page.locator('#guide')).toBeHidden();
   await drill('clear');
   await expect(card.locator('b')).toHaveText('All clear', { timeout: 30_000 });
+
+  // Inside a science stop's ground circle a prompt offers the site card; V opens it with the stop's numbers.
+  // The Jezero lander stands inside the landing stop's circle, so step out of it first.
+  const standBy = (offset: number) =>
+    page.evaluate(async (dx) => {
+      const mission = await (await fetch('./data/jezero/mission.json')).json();
+      const stop = mission.stops[0] as { x: number; z: number };
+      (window.__MARS__ as unknown as { face(bearing: number, x: number, z: number): void }).face(0, stop.x + dx, stop.z);
+    }, offset);
+  await standBy(-40);
+  await expect(page.locator('#prompts [data-prompt="site"]')).toHaveCount(0, { timeout: 30_000 });
+  await standBy(5);
+  await expect(page.locator('#prompts [data-prompt="site"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#card')).toBeHidden();
+  await page.keyboard.press('KeyV');
+  await expect(page.locator('#card figure img')).toBeVisible();
+  await expect(page.locator('#card dl div')).toHaveCount(5);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#card')).toBeHidden();
 
   // With events on, a storm arrives on its own as the Mars clock runs; here the clock is run on for up to 80 sols.
   await page.click('#stats-button');

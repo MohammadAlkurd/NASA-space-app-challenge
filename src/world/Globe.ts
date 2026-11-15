@@ -94,10 +94,20 @@ export class Globe {
   private swing = false;
   private time = 0;
   private last = performance.now();
+  /** Title framing: the planet large and cut off by the right edge, with no site names, until Start pulls back. */
+  private title: boolean;
+  /** Seconds since Start was pressed on the title, or -1. */
+  private reveal = -1;
+  /** Where the planet sits in the picker view, as fractions of the screen. */
+  private shift = 0;
+  private readonly marks = new THREE.Group();
 
   /** `home` is the site whose terrain is loaded: the globe opens on it and dives to it. */
   constructor(baseUrl: string, private readonly fromSurface = false, private readonly home: GlobeSite = SITES[0]) {
     this.selected = home;
+    this.title = !fromSurface;
+    this.marks.visible = fromSurface;
+    this.scene.add(this.marks);
     direction(home.lat, home.lon, this.target);
     this.longitude = home.lon - 38;
     this.latitude = home.lat * 0.75;
@@ -131,20 +141,33 @@ export class Globe {
     );
     this.scene.add(haze);
 
-    const stars = new Float32Array(1800 * 3);
-    const v = new THREE.Vector3();
-    for (let i = 0; i < 1800; i += 1) {
-      // Fixed pattern: golden-angle spiral over the sphere.
-      const y = 1 - (2 * (i + 0.5)) / 1800;
-      const r = Math.sqrt(1 - y * y);
-      const a = i * 2.39996323;
-      v.set(Math.cos(a) * r, y, Math.sin(a) * r).multiplyScalar(40 + (i % 7));
-      stars.set([v.x, v.y, v.z], i * 3);
+    // Stars are drawn, not a catalogue: scattered evenly at random from a fixed seed, mostly faint with a few bright ones.
+    let seed = 20261114;
+    const random = (): number => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const tint = new THREE.Color();
+    for (const [count, size, dimmest] of [[2600, 1, 0.25], [520, 2, 0.45], [70, 3, 0.8]] as const) {
+      const positions = new Float32Array(count * 3);
+      const colors = new Float32Array(count * 3);
+      for (let i = 0; i < count; i += 1) {
+        const y = 2 * random() - 1;
+        const r = Math.sqrt(1 - y * y);
+        const a = 2 * Math.PI * random();
+        positions.set([Math.cos(a) * r * 45, y * 45, Math.sin(a) * r * 45], i * 3);
+        // Most stars are near white; some lean blue and some orange.
+        const hue = random();
+        tint.set(hue < 0.2 ? '#ffd9b0' : hue < 0.45 ? '#bcd0ff' : '#ffffff').multiplyScalar(dimmest + (1 - dimmest) * random() ** 2);
+        colors.set([tint.r, tint.g, tint.b], i * 3);
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      const points = new THREE.Points(geometry, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true }));
+      this.scene.add(points);
+      this.disposables.push(geometry, points.material);
     }
-    const starGeometry = new THREE.BufferGeometry();
-    starGeometry.setAttribute('position', new THREE.BufferAttribute(stars, 3));
-    const starMaterial = new THREE.PointsMaterial({ color: '#d9d2ff', size: 1.6, sizeAttenuation: false });
-    this.scene.add(new THREE.Points(starGeometry, starMaterial));
 
     this.sun.position.copy(direction(12, this.home.lon - 55)).multiplyScalar(10);
     this.scene.add(this.sun, new THREE.AmbientLight('#6b5a66', 0.5));
@@ -157,7 +180,7 @@ export class Globe {
       dot.position.copy(normal).multiplyScalar(1.004);
       const { sprite, plain, marked } = label(site.name.split(' · ')[0]);
       sprite.position.copy(normal).multiplyScalar(1.01);
-      this.scene.add(dot, sprite);
+      this.marks.add(dot, sprite);
       this.labels.push({ sprite, plain, marked, normal, site });
       this.disposables.push(dot.material as THREE.Material, sprite.material, plain, marked);
     }
@@ -168,8 +191,8 @@ export class Globe {
     );
     this.pulse.position.copy(this.target).multiplyScalar(1.006);
     this.pulse.lookAt(this.target.clone().multiplyScalar(2));
-    this.scene.add(this.pulse);
-    this.disposables.push(color, relief, material, planet.geometry, haze.geometry, haze.material as THREE.Material, starGeometry, starMaterial, dotGeometry, this.pulse.geometry, this.pulse.material as THREE.Material);
+    this.marks.add(this.pulse);
+    this.disposables.push(color, relief, material, planet.geometry, haze.geometry, haze.material as THREE.Material, dotGeometry, this.pulse.geometry, this.pulse.material as THREE.Material);
   }
 
   get diving(): boolean {
@@ -185,7 +208,20 @@ export class Globe {
     if (this.dive >= 0) return;
     this.dive = 0;
     this.rise = -1;
+    this.title = false;
+    this.reveal = -1;
+    this.frameView(1);
     this.select(this.home);
+  }
+
+  /** Start on the title: pull back until the whole planet and its landing sites are in view. */
+  showAll(): void {
+    if (this.title && this.reveal < 0) this.reveal = 0;
+  }
+
+  /** False on the title and while pulling back from it. */
+  get revealed(): boolean {
+    return !this.title;
   }
 
   /** 0..1 while lifting off the surface into orbit. */
@@ -217,6 +253,7 @@ export class Globe {
   pick(clientX: number, clientY: number): GlobeSite | null {
     let best: GlobeSite | null = null;
     let bestDistance = 30;
+    if (this.title) return null;
     for (const { normal, site } of this.labels) {
       if (normal.dot(this.view) < 0.2) continue;
       this.projected.copy(normal).project(this.camera);
@@ -265,8 +302,24 @@ export class Globe {
     this.distance = aspect < 1 ? 3.3 / Math.max(aspect, 0.45) : 3.3;
     // On wide screens push the planet to the right, clear of the title.
     // Coming up from the surface, the site list is on the right, so push it left instead.
-    if (aspect > 1.2) this.camera.setViewOffset(width, height, this.fromSurface ? width * 0.11 : -width * 0.2, 0, width, height);
-    else this.camera.clearViewOffset();
+    this.shift = aspect > 1.2 ? (this.fromSurface ? 0.11 : -0.2) : 0;
+    this.frameView(this.title ? this.revealEase : 1);
+  }
+
+  /** 0 on the title, rising to 1 as the camera pulls back after Start. */
+  private get revealEase(): number {
+    const t = THREE.MathUtils.clamp(this.reveal / 2.4, 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+
+  /** Slides the planet between the title framing (0: centre near the right edge) and the picker framing (1). */
+  private frameView(ease: number): void {
+    const wide = this.camera.aspect > 1.2;
+    // The title puts the planet in a corner, clear of the title text: bottom right on wide screens, top right on upright phones.
+    const x = THREE.MathUtils.lerp(wide ? -0.36 : -0.3, this.shift, ease);
+    const y = THREE.MathUtils.lerp(wide ? -0.2 : 0.28, 0, ease);
+    if (x === 0 && y === 0) this.camera.clearViewOffset();
+    else this.camera.setViewOffset(this.width, this.height, this.width * x, this.height * y, this.width, this.height);
     this.camera.updateProjectionMatrix();
   }
 
@@ -277,6 +330,19 @@ export class Globe {
     this.last = now;
     this.time += dt;
     let distance = Math.max(1.45, this.distance * this.zoomFactor);
+    if (this.title) {
+      if (this.reveal >= 0) this.reveal += dt;
+      const ease = this.revealEase;
+      // On the title the planet's radius is 0.62 of the screen height, or 0.7 of the width on an upright phone.
+      const half = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+      const radius = half * (this.camera.aspect > 1.2 ? 1.24 : 1.4 * this.camera.aspect);
+      distance = THREE.MathUtils.lerp(Math.sqrt(1 + 1 / (radius * radius)), distance, ease);
+      this.frameView(ease);
+      if (ease >= 1) {
+        this.title = false;
+        this.marks.visible = true;
+      }
+    }
     if (this.rise >= 0 && !this.diving) {
       this.rise += dt;
       const t = this.rising;

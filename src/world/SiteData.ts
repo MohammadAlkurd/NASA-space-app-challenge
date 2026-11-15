@@ -8,6 +8,13 @@ export interface GridMeta {
   maxElev: number;
 }
 
+/** Tiles of the orbital photo at native resolution: count x count squares of tileM metres, px pixels each. */
+export interface NearMeta {
+  tileM: number;
+  px: number;
+  count: number;
+}
+
 export interface SiteMeta {
   id: string;
   name: string;
@@ -18,6 +25,7 @@ export interface SiteMeta {
   cosLat: number;
   local: GridMeta;
   regional: GridMeta;
+  near?: NearMeta;
   credits: string[];
 }
 

@@ -23,5 +23,10 @@
  },
  "credits": [
   "MSL Gale merged HiRISE DEM mosaic (1 m) and orthophoto mosaic (25 cm): USGS Astrogeology Science Center / NASA / JPL-Caltech / University of Arizona (Calef and Parker, 2016)"
- ]
+ ],
+ "near": {
+  "tileM": 256.0,
+  "px": 1024,
+  "count": 20
+ }
 }

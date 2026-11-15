@@ -8,6 +8,8 @@ Outputs (public/data/<site>/):
                 B = 255 for native 1 m data, 191 where the source mosaic is filled from a coarser model
   ortho.jpg     grayscale HiRISE orthoimage over the same square
   regional.png  wider, coarser heightfield for the horizon (same packing; B = 0 where no data)
+  near/j_i.webp the same orthoimage at its native 25 cm, cut into 256 m tiles (row j from the north,
+                column i from the west) that the game loads around the traveller
   site.json     georeferencing, elevation ranges, credits
 The local frame is true metres: +x east, +z south, y = elevation (MOLA areoid).
 """
@@ -97,12 +99,42 @@ def pack16(height, lo, hi, valid=None):
     return rgb
 
 
+NEAR_TILE_M = 256.0
+NEAR_TILE_PX = 1024
+
+
+def write_near_tiles(ortho, center, cos_lat, size, lo, hi, out):
+    """Cut the orthoimage at native resolution into tiles, stretched exactly like ortho.jpg."""
+    folder = os.path.join(out, "near")
+    os.makedirs(folder, exist_ok=True)
+    count = int(round(size / NEAR_TILE_M))
+    total = 0
+    for j in range(count):
+        for i in range(count):
+            east = (i + 0.5) * NEAR_TILE_M - size / 2
+            south = (j + 0.5) * NEAR_TILE_M - size / 2
+            gray, valid = read_square(ortho, (center[0] + east / cos_lat, center[1] - south),
+                                      NEAR_TILE_M / 2 / cos_lat, NEAR_TILE_M / 2, NEAR_TILE_PX, Resampling.bilinear)
+            valid &= gray > 0
+            path = os.path.join(folder, f"{j}_{i}.webp")
+            if not valid.any():
+                if os.path.exists(path):
+                    os.remove(path)
+                continue
+            gray = np.clip((fill_holes(gray, valid).astype(np.float32) - lo) / (hi - lo), 0, 1)
+            Image.fromarray((gray * 255).astype(np.uint8), "L").save(path, "WEBP", quality=70, method=6)
+            total += os.path.getsize(path)
+    print("near tiles", count * count, "total", total // 1024, "KB")
+    return {"tileM": NEAR_TILE_M, "px": NEAR_TILE_PX, "count": count}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("site")
     ap.add_argument("--raw", default=os.path.expanduser("~/work/raw"))
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "public", "data"))
     ap.add_argument("--skip-ortho", action="store_true")
+    ap.add_argument("--near-only", action="store_true", help="only rebuild the 25 cm near tiles")
     args = ap.parse_args()
 
     site = SITES[args.site]
@@ -117,6 +149,17 @@ def main():
     size = site["size_m"]
     half_y = size / 2
     half_x = size / 2 / cos_lat
+
+    if args.near_only:
+        ortho = fetch(site["ortho"], args.raw)
+        gray, ovalid = read_square(ortho, (cx, cy), half_x, half_y, site["ortho_px"], Resampling.average)
+        p1, p99 = np.percentile(fill_holes(gray, ovalid & (gray > 0)).astype(np.float32), [0.5, 99.5])
+        with open(os.path.join(out, "site.json")) as f:
+            meta = json.load(f)
+        meta["near"] = write_near_tiles(ortho, (cx, cy), cos_lat, size, p1, p99, out)
+        with open(os.path.join(out, "site.json"), "w") as f:
+            json.dump(meta, f, indent=1)
+        return
 
     dtm = fetch(site["dtm"], args.raw)
     n = site["height_px"]
@@ -138,6 +181,7 @@ def main():
     Image.fromarray(pack16(rfilled, rlo, rhi, rvalid)).save(
         os.path.join(out, "regional.png"), optimize=True)
 
+    near = None
     if not args.skip_ortho:
         ortho = fetch(site["ortho"], args.raw)
         on = site["ortho_px"]
@@ -150,6 +194,7 @@ def main():
         rgray = fill_holes(rgray, rov & (rgray > 0)).astype(np.float32)
         rgray = np.clip((rgray - p1) / (p99 - p1), 0, 1)
         Image.fromarray((rgray * 255).astype(np.uint8), "L").save(os.path.join(out, "regional_ortho.jpg"), quality=85)
+        near = write_near_tiles(ortho, (cx, cy), cos_lat, size, p1, p99, out)
 
     meta = {
         "id": args.site,
@@ -165,6 +210,8 @@ def main():
         "regional": {"sizeM": rsize, "px": rn, "cellM": rsize / rn, "minElev": rlo, "maxElev": rhi},
         "credits": site["credits"],
     }
+    if near:
+        meta["near"] = near
     with open(os.path.join(out, "site.json"), "w") as f:
         json.dump(meta, f, indent=1)
     print(json.dumps(meta, indent=1))

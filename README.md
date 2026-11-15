@@ -14,7 +14,7 @@ dose and suit energy. Visit the real science stops of Perseverance (Jezero) or C
 | --- | --- |
 | Layered, integrated view of a Martian location from multiple NASA missions | Switchable layers over two landing sites you can walk, Jezero and Gale, from Mars Reconnaissance Orbiter, Mars Odyssey, Mars Global Surveyor, Curiosity and Perseverance |
 | At least three kinds of data | Optical (HiRISE), topographic (HiRISE/MOLA), thermal (THEMIS), atmospheric (MEDA), radiation (RAD, DONKI) |
-| Astronaut safety, radiation and space weather | A "What to do now" card and a safety guide (press G) with the action, the reason and the sourced number for each hazard; dose rate and trip dose, shelter layer, low-radiation route, DONKI solar-storm status, suit-time budget, slope limits. Solar storms, dust storms and dust devils arrive on their own as the Mars clock runs, at measured rates (Stats > Real odds, or ×100 for a demo); the storm drills force one |
+| Astronaut safety, radiation and space weather | A "What to do now" card and a safety guide (press H) with the action, the reason and the sourced number for each hazard; dose rate and trip dose, shelter layer, low-radiation route, DONKI solar-storm status, suit-time budget, slope limits. Solar storms, dust storms and dust devils arrive on their own as the Mars clock runs, at measured rates (Stats > Real odds, or ×100 for a demo); the storm drills force one |
 | Suit mobility, route planning around obstacles | Separate limits for astronaut and rover; A* planner avoids no-go slopes; every risky stretch is explained |
 | Route map to science objectives | Real Perseverance and Curiosity science stops; the Science-rich route visits those on the way |
 | Point-of-view imagery from surface missions | The rover's own Navcam photo at each stop, with credit and link |
@@ -33,7 +33,7 @@ npm test           # Playwright end-to-end test (first time: npx playwright inst
 ```
 
 Controls: click the ground to plan a route, **Go** to follow it. `W A S D` / arrows to move by hand, drag to look,
-wheel to zoom, `M` map view, `C` helmet view, `E` enter or leave the rover, `F` lights, `G` safety guide, `Esc` pause and stats.
+wheel to zoom, `M` map view, `C` helmet view, `E` enter or leave the rover, `F` lights, `V` site info inside a site circle, `H` safety guide, `Esc` pause and stats (with the way back to the landing sites).
 
 ## Deploy (GitHub Pages)
 
@@ -48,7 +48,7 @@ All map data is pre-processed and committed under `public/data/`, so the build n
 | Layer | Source | Credit |
 | --- | --- | --- |
 | Terrain shape, slopes | Mars 2020 TRN HiRISE DTM mosaic, 1 m | USGS Astrogeology / NASA / JPL-Caltech / University of Arizona |
-| Ground photo | Mars 2020 TRN HiRISE orthomosaic, 25 cm | same |
+| Ground photo | Mars 2020 TRN HiRISE orthomosaic, 25 cm (1.25 m per pixel for the whole site, full 25 cm tiles within about 100 m of the traveller) | same |
 | Heat | THEMIS daytime IR global mosaic, 100 m | NASA / JPL-Caltech / Arizona State University / USGS |
 | Weather | MEDA derived + calibrated data, sol 200 | NASA PDS Atmospheres Node, Rodriguez-Manfredi et al. |
 | Radiation | RAD surface dose 0.67 mSv/day; Murray Buttes shielding | Hassler et al. 2014; Ehresmann et al. 2021 (MSL/RAD) |
