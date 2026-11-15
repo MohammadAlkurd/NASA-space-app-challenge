@@ -123,8 +123,26 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   const [csv] = await Promise.all([page.waitForEvent('download'), page.locator('#planner [data-action="csv"]').click()]);
   const lines = (await (await csv.createReadStream()).toArray()).join('').split('\n');
   expect(lines[0]).toContain('oxygen_left_pct');
-  expect(lines.filter((line) => !line.startsWith('#')).at(-1)).toContain('Back at shelter');
-  expect(lines.filter((line) => line.startsWith('# safety_rule:')).length).toBe(saved.features[0].properties.safety_rules.length);
+  // Every row parses to the header's width, so the rules load as ordinary records.
+  const parse = (line: string) => {
+    const cells = [''];
+    let quoted = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const c = line[i];
+      if (quoted && c === '"' && line[i + 1] === '"') { cells[cells.length - 1] += '"'; i += 1; }
+      else if (c === '"') quoted = !quoted;
+      else if (c === ',' && !quoted) cells.push('');
+      else cells[cells.length - 1] += c;
+    }
+    return cells;
+  };
+  const table = lines.map(parse);
+  expect(new Set(table.map((cells) => cells.length))).toEqual(new Set([table[0].length]));
+  const kindAt = table[0].indexOf('rule_kind');
+  const kind = (line: string) => parse(line)[kindAt];
+  expect(lines.filter((line) => kind(line) === '').at(-1)).toContain('Back at shelter');
+  expect(lines.filter((line) => kind(line) === 'safety_rule').length).toBe(saved.features[0].properties.safety_rules.length);
+  expect(lines.filter((line) => kind(line) === 'abort_rule').length).toBe(saved.features[0].properties.abort_rules.length);
 
   // Boarding the rover keeps the planned trip and re-plans it for the rover.
   await page.evaluate(() => (window.__MARS__ as Mars).setTraveller('rover'));

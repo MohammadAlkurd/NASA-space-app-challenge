@@ -634,17 +634,20 @@ export function toCSV(route: Route, toLatLon: LatLon, elevation: Elevation, star
     if (c.point && !after && !named.has(c.point)) named.set(c.point, rows[k]);
   });
   const rover = rows[0].oxygenPct === null;
-  const out = ['point,lat_deg,lon_deg_east,elevation_m,rating,checkpoint,clock,distance_m,energy_left_pct,oxygen_left_pct,cooling_water_left_pct,dose_uSv,shelter_walk_min,go_on_only_above_energy_pct'];
+  const out = ['point,lat_deg,lon_deg_east,elevation_m,rating,checkpoint,clock,distance_m,energy_left_pct,oxygen_left_pct,cooling_water_left_pct,dose_uSv,shelter_walk_min,go_on_only_above_energy_pct,rule_kind,rule'];
+  const columns = out[0].split(',').length;
+  // Quoted the RFC 4180 way, so commas in names and rule text stay inside one field.
+  const text = (value: string) => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
   const share = (value: number) => Math.round(Math.max(0, value) * 100);
   route.points.forEach((p, k) => {
     const { lat, lon } = toLatLon(p.x, p.z);
     const suit = suitSupplies((1 - track.left[k]) * SUIT_ENERGY_J);
     const on = named.get(p);
     out.push([
-      k, lat.toFixed(6), lon.toFixed(6), elevation(p.x, p.z).toFixed(1), route.ratings[k], on?.name ?? '',
+      k, lat.toFixed(6), lon.toFixed(6), elevation(p.x, p.z).toFixed(1), route.ratings[k], text(on?.name ?? ''),
       clock(startHour + track.atS[k] / HOUR_SECONDS), Math.round(track.distM[k]), share(track.left[k]),
       rover ? '' : share(suit.oxygen), rover ? '' : share(suit.water), (track.doseUSv[k] * doseFactor).toFixed(1),
-      on?.shelterMin ?? '', on?.goOnPct ?? '',
+      on?.shelterMin ?? '', on?.goOnPct ?? '', '', '',
     ].join(','));
   });
   rows.forEach((row, k) => {
@@ -652,12 +655,13 @@ export function toCSV(route: Route, toLatLon: LatLon, elevation: Elevation, star
     const p = stats.trip.checkpoints[k].point;
     const where = p ? toLatLon(p.x, p.z) : null;
     out.push([
-      '', where?.lat.toFixed(6) ?? '', where?.lon.toFixed(6) ?? '', p ? elevation(p.x, p.z).toFixed(1) : '', '', row.name,
-      row.clock, row.distanceM ?? '', row.energyPct, row.oxygenPct ?? '', row.waterPct ?? '', row.doseUSv, row.shelterMin ?? '', row.goOnPct ?? '',
+      '', where?.lat.toFixed(6) ?? '', where?.lon.toFixed(6) ?? '', p ? elevation(p.x, p.z).toFixed(1) : '', '', text(row.name),
+      row.clock, row.distanceM ?? '', row.energyPct, row.oxygenPct ?? '', row.waterPct ?? '', row.doseUSv, row.shelterMin ?? '', row.goOnPct ?? '', '', '',
     ].join(','));
   });
-  // The rules ride along as comment lines, so the point table above still loads as plain CSV.
-  for (const rule of abortRules(route, rows)) out.push(`# abort_rule: ${rule}`);
-  for (const rule of safety) out.push(`# safety_rule: ${rule.name}. ${rule.action} ${rule.why} [${basisText(rule.basis)}]`);
+  // The rules follow as rows of the same width, with only the last two columns filled.
+  const rule = (kind: string, body: string) => out.push(`${','.repeat(columns - 2)}${kind},${text(body)}`);
+  for (const line of abortRules(route, rows)) rule('abort_rule', line);
+  for (const line of safety) rule('safety_rule', `${line.name}. ${line.action} ${line.why} [${basisText(line.basis)}]`);
   return out.join('\n');
 }
