@@ -12,7 +12,7 @@ import { clock } from './Timeline';
 
 export { ROVER_BATTERY_WH } from './Models';
 
-export type RouteKind = 'safest' | 'fastest' | 'effort' | 'science' | 'shielded' | 'custom';
+export type RouteKind = 'safest' | 'fastest' | 'effort' | 'science' | 'shielded' | 'linked' | 'custom';
 export type Rating = 'SAFE' | 'BE CAREFUL' | 'DANGER' | 'NO-GO';
 export const RATINGS: Rating[] = ['SAFE', 'BE CAREFUL', 'DANGER', 'NO-GO'];
 
@@ -45,6 +45,8 @@ export interface RouteStats {
   worst: Rating;
   noGoM: number;
   cautionM: number;
+  /** Metres of the way out where terrain hides the lander antenna: no direct radio link. */
+  noLinkM: number;
 }
 
 export type Feasibility = 'PASS' | 'MARGINAL' | 'FAIL';
@@ -236,6 +238,7 @@ export class Router {
     add('fastest', 'Fastest');
     if (profile.mode === 'astronaut') add('effort', 'Least effort');
     add('shielded', 'Low radiation');
+    if (this.analysis.signal) add('linked', 'In radio range');
     // Science-rich: detour through up to three science stops that lie near the direct line.
     const direct = Math.hypot(goal.x - start.x, goal.z - start.z);
     const via = science
@@ -272,7 +275,7 @@ export class Router {
     }
     const stats: RouteStats = {
       distanceM: 0, durationS: 0, ascentM: 0, descentM: 0, maxSlopeDeg: 0, doseUSv: 0, resource: 0,
-      worst: 'SAFE', noGoM: 0, cautionM: 0,
+      worst: 'SAFE', noGoM: 0, cautionM: 0, noLinkM: 0,
       trip: { oneWay: false, totalS: 0, resource: 0, doseUSv: 0, stopS: 0, stopDoseUSv: 0, checkpoints: [], shelterS: 0, turnBack: null, turnBackM: 0, verdict: 'PASS', reason: '' },
     };
     const mover = profile.mode;
@@ -312,6 +315,7 @@ export class Router {
       track.slopeDeg.push(slope);
       if (rating === 'NO-GO') stats.noGoM += length;
       if (rating !== 'SAFE') stats.cautionM += length;
+      if (analysis.signal && !analysis.signal[cell]) stats.noLinkM += length;
       if (RATINGS.indexOf(rating) > RATINGS.indexOf(stats.worst)) stats.worst = rating;
       ratings.push(rating);
       const last = segments[segments.length - 1];
@@ -547,7 +551,9 @@ export class Router {
       const exposure = Math.min(1, Math.max(0, (analysis.skyView[cell] - 0.8) / 0.2));
       return time * (0.6 + 2.4 * exposure + 2 * over);
     }
-    if (kind !== 'safest') return time * (1 + 3 * over * over + 0.5 * rough);
+    // In radio range: ground out of sight of the lander antenna costs four times as much.
+    const hidden = kind === 'linked' && analysis.signal && !analysis.signal[cell] ? 4 : 1;
+    if (kind !== 'safest') return time * (1 + 3 * over * over + 0.5 * rough) * hidden;
     // Safest: stay well inside the limits, on the gentlest and smoothest ground available.
     const gentle = Math.min(1, slope / profile.cautionSlope);
     return time * (1 + 9 * over * over + 1.2 * gentle * gentle + 1.5 * rough + (slope > profile.cautionSlope ? 1.5 : 0));
@@ -615,6 +621,7 @@ export function toGeoJSON(route: Route, toLatLon: LatLon, elevation: Elevation, 
         leave_clock: rows[0].clock, back_clock: end.clock,
         energy_left_at_end_pct: end.energyPct, oxygen_left_at_end_pct: end.oxygenPct, cooling_water_left_at_end_pct: end.waterPct,
         turn_back_by_m: route.stats.trip.turnBack ? Math.round(route.stats.trip.turnBackM) : null,
+        no_radio_link_m: Math.round(route.stats.noLinkM),
         abort_rules: abortRules(route, rows),
         safety_rules: safetyExport(safety),
       },

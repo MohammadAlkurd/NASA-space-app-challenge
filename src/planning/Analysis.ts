@@ -3,7 +3,7 @@ import type { TravelProfile } from '../entities/Explorer';
 import type { SiteData } from '../world/SiteData';
 import { slopeLimits } from './Models';
 
-export type LayerId = 'optical' | 'hazard' | 'elevation' | 'radiation' | 'thermal' | 'solar';
+export type LayerId = 'optical' | 'hazard' | 'elevation' | 'radiation' | 'thermal' | 'solar' | 'signal';
 
 /** Sun position and sunlight reaching flat open ground at one moment. */
 export interface SunSample {
@@ -47,6 +47,8 @@ export class Analysis {
   /** Expected solar energy on a flat panel over one sol, Wh per m2, for the current weather. */
   solarDay: Float32Array | null = null;
   private solarKey = '';
+  /** 1 where the lander antenna is in line of sight; null until the base is known. */
+  signal: Uint8Array | null = null;
   private thermal: Uint8Array | null = null;
   private thermalSize = 0;
   private readonly textures = new Map<string, THREE.DataTexture>();
@@ -80,6 +82,13 @@ export class Analysis {
     this.thermalSize = size;
   }
 
+  /** Replace the radio coverage mask and drop its cached overlay. */
+  setSignal(mask: Uint8Array): void {
+    this.signal = mask;
+    this.textures.get('signal')?.dispose();
+    this.textures.delete('signal');
+  }
+
   /** RGBA overlay for a map layer; cached per layer (and per traveller for the hazard layer). */
   overlay(layer: LayerId, profile: TravelProfile): THREE.DataTexture | null {
     if (layer === 'optical') return null;
@@ -91,6 +100,7 @@ export class Analysis {
       else if (layer === 'elevation') this.paintElevation(data);
       else if (layer === 'radiation') this.paintRadiation(data);
       else if (layer === 'solar') this.paintSolar(data);
+      else if (layer === 'signal') this.paintSignal(data);
       else this.paintThermal(data);
       texture = new THREE.DataTexture(data, GRID, GRID, THREE.RGBAFormat);
       texture.magFilter = THREE.LinearFilter;
@@ -288,6 +298,13 @@ export class Analysis {
       const b = 150 + 60 * shelter;
       data.set([r, g, b, 120 + 80 * shelter], o * 4);
     }
+  }
+
+  private paintSignal(data: Uint8Array): void {
+    const signal = this.signal;
+    if (!signal) return;
+    // In sight of the antenna: light green wash. Hidden by terrain: dark violet.
+    for (let o = 0; o < GRID * GRID; o += 1) data.set(signal[o] ? [70, 220, 150, 70] : [60, 20, 110, 185], o * 4);
   }
 
   private paintSolar(data: Uint8Array): void {
