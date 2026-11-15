@@ -28,7 +28,8 @@ type Mars = {
 };
 
 test('loads Jezero, plans a safe route to a science stop and follows it', async ({ page }, testInfo) => {
-  test.setTimeout(480_000);
+  // Sized for a machine without a GPU, where the scene renders at about one frame a second.
+  test.setTimeout(900_000);
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -84,7 +85,7 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   // The checklist lists every leg with the supplies left, and the abort rules in plain words.
   await expect(page.locator('#planner .route').first()).toContainText(/\d+ % suit/);
   await page.locator('#planner [data-action="checklist"]').click();
-  const legs = page.locator('#checklist table.legs tbody tr');
+  const legs = page.locator('#checklist table.legs:not(.safety) tbody tr');
   await expect(legs.first()).toContainText('Start');
   await expect(legs.last()).toContainText('Back at shelter');
   const cells = await legs.evaluateAll((rows) => rows.map((row) => [...row.querySelectorAll('td')].map((td) => td.textContent ?? '')));
@@ -104,6 +105,10 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   // Oxygen outlasts suit energy, so the same abort point reads higher on the oxygen gauge.
   const rule = (await page.locator('#checklist .rules li').first().textContent())!.match(/energy is below (\d+) %.*oxygen below (\d+) %/)!;
   expect(Number(rule[2])).toBeGreaterThanOrEqual(Number(rule[1]));
+  // The general safety rules print under the abort rules, each with its sourced numbers.
+  const safetyRows = page.locator('#checklist table.safety tbody tr');
+  expect(await safetyRows.count()).toBeGreaterThanOrEqual(8);
+  await expect(safetyRows.first()).toContainText('MEASURED');
   await page.locator('#checklist [data-sheet="close"]').last().click();
   await expect(page.locator('#checklist')).toBeHidden();
 
@@ -111,12 +116,15 @@ test('loads Jezero, plans a safe route to a science stop and follows it', async 
   const [geo] = await Promise.all([page.waitForEvent('download'), page.locator('#planner [data-action="geojson"]').click()]);
   const saved = JSON.parse((await (await geo.createReadStream()).toArray()).join(''));
   expect(saved.features[0].properties.abort_rules.length).toBeGreaterThanOrEqual(3);
+  expect(saved.features[0].properties.safety_rules.length).toBe(await safetyRows.count());
+  expect(saved.features[0].properties.safety_rules[0].numbers[0]).toMatchObject({ label: expect.any(String), source: expect.any(String) });
   expect(saved.features[0].properties.oxygen_left_at_end_pct).toBe(oxygen.at(-1));
   expect(saved.features.filter((f: { geometry: { type: string } }) => f.geometry.type === 'Point').length).toBe(cells.length);
   const [csv] = await Promise.all([page.waitForEvent('download'), page.locator('#planner [data-action="csv"]').click()]);
   const lines = (await (await csv.createReadStream()).toArray()).join('').split('\n');
   expect(lines[0]).toContain('oxygen_left_pct');
-  expect(lines.at(-1)).toContain('Back at shelter');
+  expect(lines.filter((line) => !line.startsWith('#')).at(-1)).toContain('Back at shelter');
+  expect(lines.filter((line) => line.startsWith('# safety_rule:')).length).toBe(saved.features[0].properties.safety_rules.length);
 
   // Boarding the rover keeps the planned trip and re-plans it for the rover.
   await page.evaluate(() => (window.__MARS__ as Mars).setTraveller('rover'));
@@ -196,5 +204,106 @@ test('lands at Gale from the globe and plans a walk to a Curiosity stop', async 
   await page.click('#mode [data-mode="explore"]');
   await page.click('#stats-button');
   await expect(page.locator('#t-air')).toContainText(/-3\d °C/);
+  expect(errors).toEqual([]);
+});
+
+test('lander safe zone refills the suit, F switches the lights and an empty suit returns the crew to the lander', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.route('https://api.nasa.gov/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
+  type Lights = { setHour(hour: number): void; setSuit(reserve: number): void; setCamera(mode: string): void; setTimeScale(scale: number): void };
+  const state = () => page.evaluate(() => {
+    const g = window.__THREE_GAME_DIAGNOSTICS__ as unknown as { suit: number; safe: boolean; lights: { lamp: boolean; rover: boolean }; player: { position: { x: number; z: number } } };
+    return { suit: g.suit, safe: g.safe, lights: g.lights, x: g.player.position.x, z: g.player.position.z };
+  });
+
+  await page.goto('./?land=1');
+  await page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__?.started === true, null, { timeout: 180_000 });
+  await page.evaluate(() => {
+    localStorage.removeItem('mbe.lights');
+    const mars = window.__MARS__ as Lights;
+    mars.setCamera('chase');
+    mars.setSuit(0.5);
+    mars.setTimeScale(60);
+  });
+  // The crew starts at the foot of the lander's ladder, inside its safe zone, where the suit refills.
+  const start = await state();
+  expect(start.safe).toBe(true);
+  await expect(page.locator('#advice')).toContainText('At the lander');
+  await expect.poll(async () => (await state()).suit, { timeout: 60_000 }).toBeGreaterThan(0.505);
+
+  // At night the lights prompt shows; F switches the helmet lamp.
+  await page.evaluate(() => (window.__MARS__ as Lights).setHour(21));
+  await expect(page.locator('#prompts')).toContainText('Lights', { timeout: 30_000 });
+  await page.keyboard.press('KeyF');
+  await expect.poll(async () => (await state()).lights.lamp, { timeout: 30_000 }).toBe(true);
+
+  // Walk out of the ring, run the suit dry: the crew is back at the ladder with a full suit.
+  await page.evaluate(() => (window.__MARS__ as Lights).setTimeScale(20));
+  await page.keyboard.down('KeyS');
+  await expect.poll(async () => (await state()).safe, { timeout: 120_000 }).toBe(false);
+  await page.keyboard.up('KeyS');
+  await page.evaluate(() => (window.__MARS__ as Lights).setSuit(0.000001));
+  await expect.poll(async () => (await state()).safe, { timeout: 60_000 }).toBe(true);
+  const back = await state();
+  expect(Math.hypot(back.x - start.x, back.z - start.z)).toBeLessThan(1);
+  expect(back.suit).toBeGreaterThan(0.99);
+  expect(errors).toEqual([]);
+});
+
+test('the What to do now card follows the storm drills and opens the safety guide', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.route('https://api.nasa.gov/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
+  type Drill = { setHour(hour: number): void; setCamera(mode: string): void };
+
+  await page.goto('./?land=1');
+  await page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__?.started === true, null, { timeout: 180_000 });
+  await page.evaluate(() => (window.__MARS__ as Drill).setCamera('chase'));
+  const card = page.locator('#advice');
+  // A clear morning at the lander: nothing to do.
+  await expect(card).toBeVisible();
+  await expect(card.locator('b')).toHaveText('All clear', { timeout: 30_000 });
+
+  // The drills are switched from the Stats sheet, the way a player does it.
+  const drill = async (scenario: string) => {
+    await page.click('#stats-button');
+    await page.click(`#scenario [data-scenario="${scenario}"]`);
+    await page.click('#stats [data-close]');
+  };
+  await drill('solar');
+  await expect(card.locator('span')).toContainText('Solar particle storm: dose ×3', { timeout: 30_000 });
+  // The crew is standing in the lander's safe zone, so the action is to stay there.
+  await expect(card.locator('b')).toHaveText('Stay in shelter.');
+  await drill('dust');
+  await expect(card.locator('span')).toContainText('Dust storm: dust τ', { timeout: 30_000 });
+  await expect(card.locator('span')).not.toContainText('Solar');
+
+  // G opens the guide with the active rule marked; the Mars clock stands still while it is open.
+  await page.keyboard.press('KeyG');
+  await expect(page.locator('#guide')).toBeVisible();
+  await expect(page.locator('#guide .rule[data-rule]')).toHaveCount(9);
+  await expect(page.locator('#guide .rule.active h3')).toContainText('Dust storm');
+  const before = await page.locator('#t-clock').textContent();
+  await page.waitForTimeout(3000);
+  expect(await page.locator('#t-clock').textContent()).toBe(before);
+  await page.keyboard.press('KeyG');
+  await expect(page.locator('#guide')).toBeHidden();
+
+  // Clicking the card opens it too; back on a clear sol the card clears.
+  await card.click();
+  await expect(page.locator('#guide')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#guide')).toBeHidden();
+  await drill('clear');
+  await expect(card.locator('b')).toHaveText('All clear', { timeout: 30_000 });
   expect(errors).toEqual([]);
 });

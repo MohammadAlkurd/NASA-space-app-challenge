@@ -27,6 +27,11 @@ CACHE = os.environ.get("MARS_CACHE", os.path.join(ROOT, ".cache"))
 RAW_API = "https://mars.nasa.gov/rss/api/?feed=raw_images&feedtype=json"
 MEDA = "https://atmos.nmsu.edu/PDS/data/PDS4/Mars2020/mars2020_meda"
 REMS = "https://atmos.nmsu.edu/PDS/data/mslrem_1001/DATA"
+# Dust optical depth from images of the Sun (M. Lemmon): Perseverance Mastcam-Z and Curiosity Mastcam, both at 880 nm.
+TAU_M20 = "https://data.mendeley.com/public-files/datasets/gktjp9jptb/files/5eb62f12-eadf-4e87-b4bc-2966f7a5f00c/file_downloaded"
+TAU_MSL = "https://atmos.nmsu.edu/PDS/review/PDS4/msl_mmm_tau_bundle/data_derived/msl_tau_880.csv"
+# Tilt of Mars' axis, degrees.
+OBLIQUITY = 25.19
 THEMIS_DAY = "https://planetarymaps.usgs.gov/mosaic/Mars_MO_THEMIS-IR-Day_mosaic_global_100m_v12.tif"
 
 # Sampling/observation stops of the real missions inside each map. `sol` picks the rover position
@@ -238,7 +243,7 @@ def rems_rows(sol):
     folder = f"{REMS}/SOL_00180_00269/SOL{sol:05d}"
     listing = open(fetch(folder + "/", f"rems_{sol}_index.html")).read()
     name = re.search(r'href="(RME_\d+RMD[^"]*\.TAB)"', listing).group(1)
-    columns = dict(HORIZONTAL_WIND_SPEED=3, BRIGHTNESS_TEMP=7, AMBIENT_TEMP=15, LOCAL_RELATIVE_HUMIDITY=30, PRESSURE=37)
+    columns = dict(HORIZONTAL_WIND_SPEED=3, WIND_DIRECTION=5, WS_CONFIDENCE_LEVEL=6, BRIGHTNESS_TEMP=7, AMBIENT_TEMP=15, LOCAL_RELATIVE_HUMIDITY=30, PRESSURE=37)
     for row in csv.reader(io.open(fetch(f"{folder}/{name}"), newline="")):
         yield row[1], {key: row[index] for key, index in columns.items()}
 
@@ -262,23 +267,81 @@ def hourly(rows, column, lo, hi):
     return [round(float(v), 2) for v in mean], int(good.sum())
 
 
+def hourly_direction(rows, column):
+    """Mean direction the wind blows from, per local hour, degrees clockwise from north (a vector mean)."""
+    east, north, counts = np.zeros(24), np.zeros(24), np.zeros(24)
+    for lmst, row in rows:
+        value = row.get(column, "")
+        if value in ("", None) or not 0 <= float(value) <= 360:
+            continue
+        hour = int(lmst.split("M")[1][:2])
+        east[hour] += math.sin(math.radians(float(value)))
+        north[hour] += math.cos(math.radians(float(value)))
+        counts[hour] += 1
+    hours = np.arange(24)
+    good = counts > 0
+    if not good.any():
+        return None, 0
+    # Fill hours with no valid samples from their neighbours, component by component.
+    east = np.interp(hours, hours[good], east[good] / counts[good], period=24)
+    north = np.interp(hours, hours[good], north[good] / counts[good], period=24)
+    return [round(float(v)) % 360 for v in np.degrees(np.arctan2(east, north))], int(good.sum())
+
+
+def dust_opacity(station, sol):
+    """Measured optical depth at 880 nm nearest to the weather sol, and the season (Ls) on that sol.
+
+    Returns (tau, sol of the measurement, number of measurements averaged, Ls in degrees,
+    the largest tau Curiosity has measured and its sol, the largest tau at this site and its sol)."""
+    rows = []
+    msl = [(float(c[1]), float(c[2]), float(c[3])) for c in csv.reader(io.open(fetch(TAU_MSL))) if len(c) == 5 and c[0][:4].isdigit()]
+    if station == "meda":
+        for line in io.open(fetch(TAU_M20, "m20-ztau-merged.txt")):
+            cells = [c.strip() for c in line.split(",")]
+            if len(cells) == 19 and cells[2].isdigit() and float(cells[12]) > 0:
+                rows.append((float(cells[7]), float(cells[8]), float(cells[12])))
+    else:
+        rows = list(msl)
+    rows.sort()
+    days = np.array([int(r[0]) for r in rows])
+    nearest = days[np.argmin(np.abs(days - sol))]
+    values = [r[2] for r in rows if int(r[0]) == nearest]
+    # Ls advances steadily over a few sols; unwrap so the year boundary at 360 does not break the interpolation.
+    ls = float(np.interp(sol + 0.5, [r[0] for r in rows], np.unwrap([r[1] for r in rows], period=360))) % 360
+    # The 2018 planet-encircling dust storm, as Curiosity measured it: the only global storm either rover has seen.
+    worst = max(msl, key=lambda r: r[2])
+    local = max(rows, key=lambda r: r[2])
+    return round(float(np.mean(values)), 2), int(nearest), len(values), round(ls, 1), round(worst[2], 2), int(worst[0]), round(local[2], 2), int(local[0])
+
+
 def build_environment(weather, out_dir):
     kelvin = lambda values: [round(v - 273.15, 1) for v in values]
     sol = weather["sol"]
+    tau, tau_sol, tau_count, ls, storm_tau, storm_sol, peak_tau, peak_sol = dust_opacity(weather["station"], sol)
+    # The sun stands over this latitude on that sol.
+    subsolar = round(math.degrees(math.asin(math.sin(math.radians(OBLIQUITY)) * math.sin(math.radians(ls)))), 1)
+    camera = "Perseverance Mastcam-Z" if weather["station"] == "meda" else "Curiosity Mastcam"
+    sky = dict(
+        lsDeg=ls, subsolarLatDeg=subsolar, tau=tau, tauSol=tau_sol,
+        tauSource=f"{camera} images of the Sun at 880 nm, sol {tau_sol} ({tau_count} measurement{'s' if tau_count > 1 else ''}; M. Lemmon)",
+        # What the dust-storm drill replays.
+        stormTau=storm_tau,
+        stormTauSource=f"Curiosity Mastcam at Gale, sol {storm_sol}, in the 2018 planet-wide dust storm (Guzewich et al. 2019)"
+                       + (f". Perseverance's own dustiest sky so far: {peak_tau} on sol {peak_sol}" if weather["station"] == "meda" else ""),
+    )
     if weather["station"] == "meda":
         meda = lambda kind, product, level, column, lo, hi: hourly(meda_rows(sol, kind, product, level), column, lo, hi)[0]
         environment = dict(
             source=f"Mars 2020 MEDA weather station, sol {sol} (Sept 2021), hourly means by local mean solar time. "
                    "NASA PDS Atmospheres Node (J.A. Rodriguez-Manfredi et al.)",
-            station="MEDA", sol=sol,
-            # Northern summer, Ls ~ 97 deg: the sun stands close to the 25.2 deg axial tilt north of the equator.
-            subsolarLatDeg=25.0,
+            station="MEDA", sol=sol, **sky,
             airTempC=kelvin(meda("ATS", "P02", "CAL", "ATS_LOCAL_TEMP1", 120, 330)),
             groundTempC=kelvin(meda("TIRS", "P03", "CAL", "GROUND_TEMP", 120, 350)),
             pressurePa=meda("PS", "P01", "DER", "PRESSURE", 300, 1300),
             windMs=meda("WS", "P03", "DER", "HORIZONTAL_WIND_SPEED", 0, 80),
             humidityPct=meda("RHS", "P02", "DER", "LOCAL_RELATIVE_HUMIDITY", 0, 100),
         )
+        direction, direction_hours = hourly_direction(meda_rows(sol, "WS", "P03", "DER"), "WIND_DIRECTION")
     else:
         rows = list(rems_rows(sol))
         rems = lambda column, lo, hi: hourly(rows, column, lo, hi)
@@ -288,17 +351,27 @@ def build_environment(weather, out_dir):
                    f"Wind was measured in {wind_hours} of the 24 hours (one of the two wind booms was damaged "
                    "at landing); the other hours are filled in from their neighbours. "
                    "NASA PDS Atmospheres Node (J. Gomez-Elvira et al.)",
-            station="REMS", sol=sol,
-            # Southern summer solstice, Ls ~ 270 deg: the sun stands 25 deg south of the equator.
-            subsolarLatDeg=-25.0,
+            station="REMS", sol=sol, **sky,
             airTempC=kelvin(rems("AMBIENT_TEMP", 120, 330)[0]),
             groundTempC=kelvin(rems("BRIGHTNESS_TEMP", 120, 350)[0]),
             pressurePa=rems("PRESSURE", 300, 1300)[0],
             windMs=wind,
             humidityPct=rems("LOCAL_RELATIVE_HUMIDITY", 0, 100)[0],
         )
+        # REMS flags each wind sample; keep directions only where the wind came from the front of the
+        # working boom and the retrieval is marked reliable (bytes 4 and 5 of the confidence string).
+        trusted = [(lmst, row) for lmst, row in rows if row["WS_CONFIDENCE_LEVEL"].strip(' "')[4:6] == "11"]
+        direction, direction_hours = hourly_direction(trusted, "WIND_DIRECTION")
+        if direction_hours < 12:
+            print(f"  REMS wind direction: reliable samples in only {direction_hours} hours, left out")
+            direction = None
+    if direction:
+        environment.update(windDirDeg=direction, windDirHours=direction_hours)
     json.dump(environment, open(os.path.join(out_dir, "environment.json"), "w"), separators=(",", ":"))
-    for key in ("airTempC", "groundTempC", "windMs", "pressurePa", "humidityPct"):
+    print("  sky:", sky)
+    for key in ("airTempC", "groundTempC", "windMs", "windDirDeg", "pressurePa", "humidityPct"):
+        if key not in environment:
+            continue
         print(f"  {environment['station']} {key} by hour:", environment[key])
 
 

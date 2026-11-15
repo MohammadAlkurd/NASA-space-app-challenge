@@ -11,7 +11,8 @@
   "px": 2048,
   "cellM": 2.5,
   "minElev": -4530.0,
-  "maxElev": -4370.0
+  "maxElev": -4370.0,
+  "coarseFraction": 0.0518
  },
  "regional": {
   "sizeM": 20480.0,

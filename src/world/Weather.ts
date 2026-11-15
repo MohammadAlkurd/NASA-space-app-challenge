@@ -163,12 +163,12 @@ export class Weather {
    * @param storm 0 on a clear sol, 1 in a full dust storm.
    * @param mapHeight camera height when looking straight down at the map, otherwise 0.
    */
-  update(dt: number, camera: THREE.PerspectiveCamera, traveller: THREE.Vector3, windMs: number, storm: number, daylight: number, viewportHeight: number, mapHeight: number): void {
+  update(dt: number, camera: THREE.PerspectiveCamera, traveller: THREE.Vector3, windMs: number, windFromDeg: number | null, hour: number, storm: number, daylight: number, viewportHeight: number, mapHeight: number): void {
     this.time += dt;
-    // The weather table has no wind direction, so the wind blows from the west and veers slowly.
-    const bearing = 1.45 + 0.35 * Math.sin(this.time * 0.04);
+    // Dust moves downwind of the measured direction. Without one, the wind blows from the west and veers slowly.
+    const bearing = windFromDeg === null ? 1.45 + 0.35 * Math.sin(this.time * 0.04) : THREE.MathUtils.degToRad(windFromDeg + 180);
     const windX = Math.sin(bearing);
-    const windZ = -Math.cos(bearing) * 0.4;
+    const windZ = -Math.cos(bearing) * (windFromDeg === null ? 0.4 : 1);
     const gust = 1 + 0.25 * Math.sin(this.time * 0.9);
     this.drift.x += windX * windMs * gust * dt;
     this.drift.z += windZ * windMs * gust * dt;
@@ -203,7 +203,10 @@ export class Weather {
     this.dust.geometry.setDrawRange(PUFFS - banks, banks + grains);
 
     // Dust devils: gusty daytime, and not inside a storm, where nothing that far away can be seen.
-    const wanted = windMs > 6.5 && daylight > 0.6 && storm < 0.3 ? 1 : 0;
+    // Perseverance's weather station logged the most whirlwinds between 12:00 and 13:00 (Newman et al. 2022).
+    // They build up and die away around that hour; the 09:00-17:00 window is our own shape, not a measured one.
+    const season = THREE.MathUtils.smoothstep(hour, 9, 12) * (1 - THREE.MathUtils.smoothstep(hour, 14, 17));
+    const wanted = windMs > 6.5 && daylight > 0.6 && storm < 0.3 ? season : 0;
     this.devilLevel += (wanted - this.devilLevel) * Math.min(1, dt * 0.5);
     this.devils.visible = this.devilLevel > 0.02;
     if (!this.devils.visible) return;

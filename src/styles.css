@@ -70,6 +70,12 @@ button.link { min-height: 0; padding: 0; background: none; text-decoration: unde
 .flag { --tone: var(--color-safe); display: flex; align-items: baseline; gap: var(--space-xs); background: var(--color-paper); padding: var(--space-2xs) var(--space-sm); font-size: var(--text-sm); }
 .flag b { color: var(--tone); font-weight: 600; white-space: nowrap; }
 .flag span:empty { display: none; }
+#advice { flex-wrap: wrap; column-gap: var(--space-xs); row-gap: 0; text-align: left; cursor: pointer; pointer-events: auto; color: var(--color-ink); min-height: 0; }
+#advice b { white-space: normal; }
+#advice span { flex-basis: 100%; order: 3; color: var(--color-ink-2); }
+#advice kbd { margin-left: auto; color: var(--color-muted); font-size: var(--text-xs); }
+#advice.alert { border-color: var(--tone); }
+/* The planning tools sit under the clock, so on the map the card goes beside it. */
 
 #mode { top: var(--edge); left: 50%; translate: -50% 0; width: 200px; }
 #guidance { top: 62px; left: 50%; translate: -50% 0; width: max-content; max-width: calc(100% - 440px); background: var(--color-paper); padding: var(--space-xs) var(--space-sm); font-size: var(--text-sm); font-weight: 500; }
@@ -104,15 +110,19 @@ kbd { display: inline-grid; place-items: center; min-width: 28px; height: 28px; 
 #tray button:hover { background: var(--color-paper-3); }
 #tray button.active { background: var(--color-ink); }
 
-#tools { top: 96px; left: var(--edge); width: 128px; display: grid; gap: var(--space-xs); }
-#layers { top: var(--edge); right: var(--edge); width: 136px; display: grid; gap: var(--space-2xs); }
+/* Plan: tools, map layers and the routes sit in one dock at the bottom. */
+#dock { left: 50%; bottom: var(--edge); translate: -50% 0; width: max-content; max-width: calc(100% - 2 * var(--edge)); display: grid; gap: var(--space-xs); justify-items: center; pointer-events: none; }
+#dock > * { pointer-events: auto; }
+#bar, #tools, #layers { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-xs); }
+#layers .check { padding: 0 var(--space-xs); }
+#dock .legend { max-width: 100%; padding: var(--space-2xs) var(--space-xs); }
 .legend { background: var(--color-paper); padding: var(--space-xs); font-size: var(--text-xs); line-height: 1.6; }
 .legend:empty { display: none; }
 .legend i { display: inline-block; width: 9px; height: 9px; margin: 0 4px 0 6px; vertical-align: -1px; }
 .legend i:first-child { margin-left: 0; }
 .check { display: flex; align-items: center; gap: var(--space-xs); background: var(--color-paper); padding: var(--space-xs); font-size: var(--text-sm); cursor: pointer; }
 .check input { accent-color: var(--color-accent); width: 15px; height: 15px; margin: 0; }
-#planner { left: 50%; bottom: var(--edge); translate: -50% 0; width: max-content; max-width: min(960px, calc(100% - 2 * var(--edge))); display: grid; gap: var(--space-sm); background: var(--color-paper); padding: var(--space-sm); box-shadow: var(--shadow-card); }
+#planner { width: max-content; max-width: min(960px, 100%); display: grid; gap: var(--space-sm); background: var(--color-paper); padding: var(--space-sm); box-shadow: var(--shadow-card); }
 .hint { font-size: var(--text-sm); }
 .routes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(168px, 1fr); gap: 1px; overflow-x: auto; }
 .route { display: grid; gap: 2px; align-content: start; text-align: left; padding: var(--space-xs) var(--space-sm); font-size: var(--text-xs); line-height: 1.45; color: var(--color-muted); font-variant-numeric: tabular-nums; }
@@ -144,6 +154,21 @@ kbd { display: inline-grid; place-items: center; min-width: 28px; height: 28px; 
 .picture .shot img { cursor: zoom-in; }
 .picture .shot b { font-size: var(--text-xl); font-weight: var(--display-weight); font-stretch: var(--display-stretch); }
 #stats .sheet { width: min(760px, 100%); }
+#guide .sheet { width: min(1180px, 100%); }
+#guide-body { display: grid; }
+.rule { display: grid; grid-template-columns: 1fr 1fr 1fr 1.5fr; gap: var(--space-2xs) var(--space-md); padding: var(--space-sm); border-top: 1px solid var(--color-rule); border-left: 4px solid transparent; font-size: var(--text-sm); }
+.rule.head { padding-block: var(--space-2xs); border-top: 0; color: var(--color-muted); }
+.rule h3 { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-sm); font-size: var(--text-md); }
+.rule .chip { display: none; color: var(--color-accent-ink); background: var(--color-accent); padding: 0 var(--space-xs); font-size: var(--text-sm); }
+.rule.active { border-left-color: var(--color-accent); background: var(--color-paper-3); }
+.rule.active .chip { display: inline; }
+.rule .do { font-weight: 600; color: var(--color-ink); }
+.rule ul { display: grid; gap: var(--space-2xs); margin: 0; padding: 0; list-style: none; color: var(--color-muted); font-size: var(--text-xs); }
+.rule li b { color: var(--color-ink-2); }
+.rule li i { font-style: normal; color: var(--color-accent); }
+.safety td { vertical-align: top; }
+.about table.legs.safety td { white-space: normal; min-width: 150px; }
+.about table.legs.safety td:last-child { white-space: nowrap; }
 .groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-lg); }
 dl { display: grid; margin-top: var(--space-2xs); }
 dl div { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-xs); border-top: 1px solid var(--color-rule); padding: var(--space-2xs) 0; font-size: var(--text-sm); }
@@ -187,7 +212,7 @@ input[type='range'] { width: 100%; accent-color: var(--color-accent); margin: 0;
 .verdict.pass { color: var(--color-safe); }
 .verdict.marginal { color: var(--color-care); }
 .verdict.fail { color: var(--color-nogo); }
-#checklist .sheet { max-width: 1040px; overflow-x: auto; }
+#checklist .sheet { width: min(1040px, 100%); grid-template-columns: minmax(0, 1fr); }
 #photo { cursor: zoom-out; align-content: center; gap: var(--space-sm); }
 #photo img { max-width: 100%; max-height: 80vh; }
 #photo p { max-width: 900px; font-size: var(--text-sm); color: var(--color-ink-2); text-align: center; }
@@ -206,18 +231,22 @@ input[type='range'] { width: 100%; accent-color: var(--color-accent); margin: 0;
   :root { --edge: 8px; }
   #mode { left: auto; right: var(--edge); translate: none; width: 150px; }
   #status { max-width: calc(100% - 176px); }
+  #advice kbd, #advice span, .rule.head { display: none; }
+  #advice b { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .rule { grid-template-columns: 1fr; }
   #radar { top: 52px; width: 116px; }
   #minimap { width: 116px; height: 116px; }
   #near { height: 56px; }
   #guidance, #toast { top: auto; bottom: 150px; max-width: calc(100% - 16px); }
   #vitals { width: 150px; }
-  #tools, #layers { left: var(--edge); right: var(--edge); width: auto; display: flex; gap: var(--space-2xs); overflow-x: auto; }
-  #tools { top: 92px; }
-  #layers { top: 134px; }
-  #tools .stack, #layers .stack { display: flex; flex: none; }
+  #dock { left: var(--edge); right: var(--edge); width: auto; translate: none; justify-items: stretch; gap: var(--space-2xs); }
+  #bar { display: grid; gap: var(--space-2xs); }
+  #tools, #layers { flex-wrap: nowrap; justify-content: start; gap: var(--space-2xs); overflow-x: auto; }
+  #tools .segmented, #layers .segmented { display: flex; flex: none; }
   #tools button, #layers button { flex: none; white-space: nowrap; }
-  #layers .legend, #layers .check { display: none; }
-  #planner { width: auto; left: var(--edge); right: var(--edge); translate: none; max-height: 46vh; overflow-y: auto; }
+  #dock .legend, #layers .check { display: none; }
+  #planner { width: auto; max-width: none; max-height: 40vh; overflow-y: auto; }
+  #checklist table.legs { display: block; overflow-x: auto; }
   /* Prompts and the trip sit above the bottom row, on the right; the stick keeps the left thumb. */
   #deck { left: auto; right: var(--edge); bottom: 84px; translate: none; justify-items: end; max-width: calc(100% - 150px); }
   #prompts { flex-wrap: wrap; justify-content: end; }
@@ -232,6 +261,7 @@ input[type='range'] { width: 100%; accent-color: var(--color-accent); margin: 0;
   #checklist { position: static; background: none; }
   #checklist .sheet { max-height: none; overflow: visible; box-shadow: none; }
   #checklist button { display: none; }
+  #checklist table.legs { display: table; }
 }
 
 /* Indie pass: pixel display type, dark outlines and a hard drop under every plate; buttons press down like keys. */

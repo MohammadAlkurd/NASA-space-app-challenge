@@ -4,7 +4,8 @@
     python pipeline/build_site.py jezero --raw ~/work/raw
 
 Outputs (public/data/<site>/):
-  height.png    local heightfield, 16-bit elevation packed as R = high byte, G = low byte
+  height.png    local heightfield, 16-bit elevation packed as R = high byte, G = low byte;
+                B = 255 for native 1 m data, 191 where the source mosaic is filled from a coarser model
   ortho.jpg     grayscale HiRISE orthoimage over the same square
   regional.png  wider, coarser heightfield for the horizon (same packing; B = 0 where no data)
   site.json     georeferencing, elevation ranges, credits
@@ -58,6 +59,33 @@ def fill_holes(height, valid):
     return height[tuple(idx)]
 
 
+def coarse_fill(path, center, half_x, half_y, out_px):
+    """Fraction of each output cell where the source mosaic is not native-resolution data.
+
+    The Gale mosaic patches a gap in its 1 m HiRISE coverage with a ~20 m model, stored as
+    blocks of identical values. Native float elevations almost never repeat exactly, so a
+    neighbourhood full of zero differences marks the patch."""
+    with rasterio.open(path) as ds:
+        t = ds.transform
+        window = Window((center[0] - half_x - t.c) / t.a, (t.f - (center[1] + half_y)) / -t.e,
+                        2 * half_x / t.a, 2 * half_y / -t.e)
+        raw = ds.read(1, window=window, boundless=True, fill_value=ds.nodata)
+    flat = np.zeros(raw.shape, np.float32)
+    flat[:-1, :-1] = (np.diff(raw, axis=1)[:-1] == 0) & (np.diff(raw, axis=0)[:, :-1] == 0)
+    patch = ndimage.uniform_filter(flat, 41) > 0.2
+    return np.asarray(Image.fromarray(patch.astype(np.float32)).resize((out_px, out_px), Image.BILINEAR))
+
+
+def smooth_coarse(height, coarse, cell_m, block_m=20.0):
+    """Replace the stair-steps of the coarse patch with a smooth surface through them."""
+    mask = coarse > 0.5
+    if not mask.any():
+        return height, mask
+    smooth = ndimage.gaussian_filter(height, 0.4 * block_m / cell_m)
+    weight = np.clip(ndimage.gaussian_filter(ndimage.binary_dilation(mask, iterations=4).astype(np.float32), 3), 0, 1)
+    return height * (1 - weight) + smooth * weight, mask
+
+
 def pack16(height, lo, hi, valid=None):
     """R = high byte, G = low byte, B = 255 where the source had data. Opaque RGB so
     browsers decode it without premultiplied-alpha or colour-profile changes."""
@@ -95,8 +123,12 @@ def main():
     height, valid = read_square(dtm, (cx, cy), half_x, half_y, n, Resampling.average)
     print("local nodata fraction", 1 - valid.mean())
     height = fill_holes(height, valid)
+    height, coarse = smooth_coarse(height, coarse_fill(dtm, (cx, cy), half_x, half_y, n), size / n)
+    print("coarse-source fraction", coarse.mean())
     lo, hi = float(math.floor(height.min())), float(math.ceil(height.max()))
-    Image.fromarray(pack16(height, lo, hi)).save(os.path.join(out, "height.png"), optimize=True)
+    packed = pack16(height, lo, hi)
+    packed[..., 2] = np.where(coarse, 191, 255)
+    Image.fromarray(packed).save(os.path.join(out, "height.png"), optimize=True)
 
     rn = site["regional_px"]
     rsize = site["regional_size_m"]
@@ -128,7 +160,8 @@ def main():
         "centerLat": math.degrees(lat0),
         "centerLon": math.degrees(lon0),
         "cosLat": cos_lat,
-        "local": {"sizeM": size, "px": n, "cellM": size / n, "minElev": lo, "maxElev": hi},
+        "local": {"sizeM": size, "px": n, "cellM": size / n, "minElev": lo, "maxElev": hi,
+                  "coarseFraction": round(float(coarse.mean()), 4)},
         "regional": {"sizeM": rsize, "px": rn, "cellM": rsize / rn, "minElev": rlo, "maxElev": rhi},
         "credits": site["credits"],
     }

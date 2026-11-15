@@ -33,6 +33,8 @@ export class Heightfield {
     readonly n: number,
     readonly size: number,
     readonly valid?: Uint8Array,
+    /** 1 where the source mosaic is filled from a coarser model than the rest. */
+    readonly coarse?: Uint8Array,
   ) {
     this.cell = size / n;
     this.half = size / 2;
@@ -136,21 +138,24 @@ async function loadPixels(url: string): Promise<ImageData> {
   return context.getImageData(0, 0, canvas.width, canvas.height);
 }
 
-/** Decode a height PNG: R = high byte, G = low byte, B = validity. */
+/** Decode a height PNG: R = high byte, G = low byte, B = validity (255 native data, 191 coarser source, 0 none). */
 async function loadHeightfield(url: string, grid: GridMeta, offset: number): Promise<Heightfield> {
   const image = await loadPixels(url);
   const count = image.width * image.height;
   const data = new Float32Array(count);
   const valid = new Uint8Array(count);
+  const coarse = new Uint8Array(count);
   const range = grid.maxElev - grid.minElev;
   const base = grid.minElev - offset;
   const pixels = image.data;
   for (let i = 0; i < count; i += 1) {
     const value = pixels[i * 4] * 256 + pixels[i * 4 + 1];
     data[i] = base + (value / 65535) * range;
-    valid[i] = pixels[i * 4 + 2] > 127 ? 1 : 0;
+    const flag = pixels[i * 4 + 2];
+    valid[i] = flag > 127 ? 1 : 0;
+    coarse[i] = flag > 127 && flag < 224 ? 1 : 0;
   }
-  return new Heightfield(data, image.width, grid.sizeM, valid);
+  return new Heightfield(data, image.width, grid.sizeM, valid, coarse);
 }
 
 export async function loadSite(id: string): Promise<SiteData> {

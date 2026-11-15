@@ -8,7 +8,7 @@ Source: https://www.spaceappschallenge.org/2026/challenges/interplanetary-surviv
 | 2 | Data from multiple NASA science missions | Done | MRO (HiRISE), Odyssey (THEMIS), MGS (MOLA datum), MSL (RAD), Mars 2020 (MEDA, Navcam, traverse) | Sources panel |
 | 3 | At least three kinds of data (optical, thermal, spectral, topographic, geophysical, atmospheric, radiation, chemical) | Done: 5 kinds | optical, topographic, thermal, atmospheric, radiation | Sources panel table |
 | 4 | Help a human explorer plan and carry out a Marswalk safely | Done | Route planner + follow mode; `src/planning/Router.ts`, `src/game/Game.ts` | Click ground, pick route, Go |
-| 5 | Astronaut safety: radiation and space weather | Done | Dose rate/trip dose, shelter layer, Low-radiation route, DONKI status | Telemetry panel; Radiation layer |
+| 5 | Astronaut safety: radiation and space weather | Done | "What to do now" card + Safety guide from one rules list (`src/planning/Safety.ts`), also printed on the checklist and written to the GeoJSON/CSV exports; dose rate/trip dose, shelter layer, Low-radiation route, DONKI status | Card under the clock; press G; Stats > Solar storm / Dust storm drill; Radiation layer |
 | 6 | Suit mobility; routes around obstacles | Done | Astronaut limits (0.9 m/s, 20° no-go) vs rover (2.0 m/s, 25°); ratings with reasons | Switch Astronaut/Rover, compare routes |
 | 7 | Route map to science objectives | Done | 9 Perseverance stops at Jezero, 10 Curiosity stops at Gale; Science-rich route | Click a blue stop, "Route here" |
 | 8 | Point-of-view imagery from NASA surface missions | Done | Navcam photo per stop with credit and link | Click a blue stop |

@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 import {
   MARS_G, MODEL, SUIT_ENERGY_J, marquezSpeed, pace, roverEnergyJ, suitSupplies, walkEnergyJ,
 } from '../src/planning/Models';
+import { LIMITS, type Conditions } from '../src/data/Conditions';
+import { advise, safetyRules, type SafetyState } from '../src/planning/Safety';
 
 // Checks of the planning formulas against the published numbers they come from. No browser needed.
 test.describe('planning models', () => {
@@ -82,5 +84,49 @@ test.describe('planning models', () => {
     const dust = 0.7;
     expect(walkEnergyJ(1000, 0, 0.9 * dust)).toBeGreaterThan(walkEnergyJ(1000, 0, 0.9));
     expect(roverEnergyJ(1000, 0, MODEL.roverSpeed.value * dust)).toBeGreaterThan(roverEnergyJ(1000, 0));
+  });
+
+  test('the safety card picks the most urgent rule, in the agreed order, and clears when nothing is wrong', () => {
+    const rules = safetyRules(8.59, 'Curiosity Mastcam, 2018 global dust storm');
+    expect(rules.map((r) => r.id)).toEqual(['solar', 'dust', 'shelter', 'walkback', 'supplies', 'dark', 'cold', 'gust', 'steep']);
+    // Every rule carries the labelled, sourced constants behind it.
+    for (const rule of rules) {
+      expect(rule.basis.length).toBeGreaterThan(0);
+      for (const b of rule.basis) expect(b.source.length).toBeGreaterThan(0);
+    }
+    const clear: Conditions = { scenario: 'clear', tau: 0.42, windMs: 4, speedFactor: 1, doseFactor: 1, solarWm2: 400, verdict: 'GO', reasons: [] };
+    const calm: SafetyState = {
+      conditions: clear, sunElevationDeg: 40, airTempC: -30, rover: false, sheltered: false,
+      shelterWalkS: 600, walkHomeJ: 0.05 * SUIT_ENERGY_J, suitUsedJ: 0, slopeDeg: 3,
+    };
+    expect(advise(rules, calm)).toBeNull();
+    // Everything wrong at once: the solar storm wins. Removing the worst problem each time walks down the list.
+    const all: SafetyState = {
+      ...calm,
+      conditions: { ...clear, scenario: 'dust', doseFactor: MODEL.stormDose.value, windMs: LIMITS.gust.value + 1 },
+      shelterWalkS: (MODEL.shelterWalk.value + 5) * 60, suitUsedJ: 0.9 * SUIT_ENERGY_J,
+      sunElevationDeg: LIMITS.darkSun.value - 1, airTempC: LIMITS.deepCold.value - 1, slopeDeg: MODEL.walkSlopeLimit.value,
+    };
+    expect(advise(rules, all)?.id).toBe('solar');
+    const noSolar = { ...all, conditions: { ...all.conditions, doseFactor: 1 } };
+    expect(advise(rules, noSolar)?.id).toBe('dust');
+    const noDust = { ...noSolar, conditions: { ...noSolar.conditions, scenario: 'clear' as const } };
+    expect(advise(rules, noDust)?.id).toBe('shelter');
+    const near = { ...noDust, shelterWalkS: 600 };
+    expect(advise(rules, near)?.id).toBe('supplies');
+    const full = { ...near, suitUsedJ: 0 };
+    expect(advise(rules, full)?.id).toBe('dark');
+    const day = { ...full, sunElevationDeg: 40 };
+    expect(advise(rules, day)?.id).toBe('cold');
+    const warm = { ...day, airTempC: -30 };
+    expect(advise(rules, warm)?.id).toBe('gust');
+    const still = { ...warm, conditions: { ...warm.conditions, windMs: 4 } };
+    expect(advise(rules, still)?.id).toBe('steep');
+    // The supplies rule fires exactly at the walk home plus the reserve.
+    const edge = (used: number) => advise(rules, { ...calm, suitUsedJ: used * SUIT_ENERGY_J })?.id;
+    expect(edge(1 - 0.05 - MODEL.marginal.value / 100 - 0.01)).toBeUndefined();
+    expect(edge(1 - 0.05 - MODEL.marginal.value / 100 + 0.01)).toBe('supplies');
+    // In the rover the walk-home rule replaces the on-foot ones.
+    expect(advise(rules, { ...calm, rover: true, walkHomeJ: 1.2 * SUIT_ENERGY_J })?.id).toBe('walkback');
   });
 });

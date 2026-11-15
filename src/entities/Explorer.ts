@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MODEL, gradeDeg, pace } from '../planning/Models';
+import { MODEL, gradeDeg, pace, slopeLimits } from '../planning/Models';
 import type { SiteData } from '../world/SiteData';
 
 export type TravelMode = 'rover' | 'astronaut';
@@ -17,11 +17,11 @@ export interface TravelProfile {
 
 /**
  * Limits used for both driving and route planning; speeds and their sources are in planning/Models.ts.
- * Slope limits are our assumptions: the rover's 25 deg no-go matches the steepest slopes the Apollo rovers drove (22-25 deg).
+ * The slope limits are in Models.ts as well; they are our assumptions.
  */
 export const PROFILES: Record<TravelMode, TravelProfile> = {
-  rover: { mode: 'rover', label: 'Crew rover', speed: MODEL.roverSpeed.value, maxSlope: 25, cautionSlope: 15 },
-  astronaut: { mode: 'astronaut', label: 'Astronaut on foot', speed: MODEL.walkPlanSpeed.value, maxSlope: 20, cautionSlope: 12 },
+  rover: { mode: 'rover', label: 'Crew rover', speed: MODEL.roverSpeed.value, maxSlope: slopeLimits('rover').limit, cautionSlope: slopeLimits('rover').care },
+  astronaut: { mode: 'astronaut', label: 'Astronaut on foot', speed: MODEL.walkPlanSpeed.value, maxSlope: slopeLimits('astronaut').limit, cautionSlope: slopeLimits('astronaut').care },
 };
 
 export interface ControlInput {

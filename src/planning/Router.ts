@@ -3,8 +3,10 @@ import type { TravelProfile } from '../entities/Explorer';
 import { Analysis, GRID, doseRate } from './Analysis';
 import { abortRules, checklistRows, type ChecklistRow } from './Checklist';
 import type { Contingency } from './Contingency';
+import { basisText, safetyExport, type SafetyRule } from './Safety';
 import {
   MODEL, ROVER_BATTERY_WH, SHELTER_WALK_S, STOP_S, SUIT_ENERGY_J, WORK_RATE_W, gradeDeg, pace, suitSupplies, travelEnergyJ,
+  slopeLimits,
 } from './Models';
 import { clock } from './Timeline';
 
@@ -145,8 +147,8 @@ const NEIGHBOURS = [
   [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
 ];
 
-export function rate(slope: number, roughness: number, profile: TravelProfile): { rating: Rating; reason: string } {
-  const mid = (profile.cautionSlope + profile.maxSlope) / 2;
+export function rate(slope: number, roughness: number, profile: TravelProfile, coarse = 0): { rating: Rating; reason: string } {
+  const mid = slopeLimits(profile.mode).steep;
   const who = profile.mode === 'rover' ? 'rover' : 'suit';
   if (slope >= profile.maxSlope) {
     return { rating: 'NO-GO', reason: `Slope ${slope.toFixed(0)}° is over the ${profile.maxSlope}° ${who} limit: tip-over or fall risk` };
@@ -154,6 +156,7 @@ export function rate(slope: number, roughness: number, profile: TravelProfile): 
   if (slope >= mid) return { rating: 'DANGER', reason: `Steep ${slope.toFixed(0)}° slope, close to the ${profile.maxSlope}° ${who} limit` };
   if (slope >= profile.cautionSlope) return { rating: 'BE CAREFUL', reason: `Slope ${slope.toFixed(0)}°: slow, slippery going` };
   if (roughness > 0.35) return { rating: 'BE CAREFUL', reason: 'Rough ground: rocks or sand ripples' };
+  if (coarse) return { rating: 'BE CAREFUL', reason: 'Low-detail NASA elevation data here (20 m): slopes are uncertain' };
   return { rating: 'SAFE', reason: '' };
 }
 
@@ -286,7 +289,7 @@ export class Router {
       const length = Math.hypot(b.x - a.x, b.z - a.z);
       const cell = analysis.index((a.x + b.x) / 2, (a.z + b.z) / 2);
       const slope = analysis.effectiveSlope(cell);
-      const { rating, reason } = rate(slope, analysis.roughness[cell], profile);
+      const { rating, reason } = rate(slope, analysis.roughness[cell], profile, analysis.coarse[cell]);
       const climb = field.heightAt(b.x, b.z) - field.heightAt(a.x, a.z);
       const grade = gradeDeg(climb, length);
       const speed = pace(mover, grade);
@@ -578,7 +581,7 @@ export function formatDuration(seconds: number): string {
 type LatLon = (x: number, z: number) => { lat: number; lon: number };
 type Elevation = (x: number, z: number) => number;
 
-export function toGeoJSON(route: Route, toLatLon: LatLon, elevation: Elevation, traveller: string, startHour = 0, doseFactor = 1): string {
+export function toGeoJSON(route: Route, toLatLon: LatLon, elevation: Elevation, traveller: string, startHour = 0, doseFactor = 1, safety: SafetyRule[] = []): string {
   const position = (p: RoutePoint) => {
     const { lat, lon } = toLatLon(p.x, p.z);
     return [Number(lon.toFixed(6)), Number(lat.toFixed(6)), Number(elevation(p.x, p.z).toFixed(1))];
@@ -613,6 +616,7 @@ export function toGeoJSON(route: Route, toLatLon: LatLon, elevation: Elevation, 
         energy_left_at_end_pct: end.energyPct, oxygen_left_at_end_pct: end.oxygenPct, cooling_water_left_at_end_pct: end.waterPct,
         turn_back_by_m: route.stats.trip.turnBack ? Math.round(route.stats.trip.turnBackM) : null,
         abort_rules: abortRules(route, rows),
+        safety_rules: safetyExport(safety),
       },
       geometry: { type: 'LineString', coordinates: route.points.map(position) },
     }, ...checkpoints],
@@ -620,7 +624,7 @@ export function toGeoJSON(route: Route, toLatLon: LatLon, elevation: Elevation, 
 }
 
 /** One row per route point on the way out, then the checklist lines for leaving the stop and getting home. */
-export function toCSV(route: Route, toLatLon: LatLon, elevation: Elevation, startHour = 0, doseFactor = 1): string {
+export function toCSV(route: Route, toLatLon: LatLon, elevation: Elevation, startHour = 0, doseFactor = 1, safety: SafetyRule[] = []): string {
   const { track, stats } = route;
   const rows = checklistRows(route, startHour, doseFactor);
   // Lines that sit on the way out; leaving the stop and getting home are added after the track.
@@ -652,5 +656,8 @@ export function toCSV(route: Route, toLatLon: LatLon, elevation: Elevation, star
       row.clock, row.distanceM ?? '', row.energyPct, row.oxygenPct ?? '', row.waterPct ?? '', row.doseUSv, row.shelterMin ?? '', row.goOnPct ?? '',
     ].join(','));
   });
+  // The rules ride along as comment lines, so the point table above still loads as plain CSV.
+  for (const rule of abortRules(route, rows)) out.push(`# abort_rule: ${rule}`);
+  for (const rule of safety) out.push(`# safety_rule: ${rule.name}. ${rule.action} ${rule.why} [${basisText(rule.basis)}]`);
   return out.join('\n');
 }

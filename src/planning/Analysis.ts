@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { TravelProfile } from '../entities/Explorer';
 import type { SiteData } from '../world/SiteData';
+import { slopeLimits } from './Models';
 
 export type LayerId = 'optical' | 'hazard' | 'elevation' | 'radiation' | 'thermal' | 'solar';
 
@@ -38,6 +39,8 @@ export class Analysis {
   readonly slopeMax = new Float32Array(GRID * GRID);
   /** Height variation left after removing the local tilt, metres: rocks, ripples, rubble. */
   readonly roughness = new Float32Array(GRID * GRID);
+  /** 1 where NASA's mosaic is filled from a ~20 m model, so slopes and rocks there are less certain. */
+  readonly coarse = new Uint8Array(GRID * GRID);
   /** Fraction of the sky hemisphere visible, 0..1. */
   readonly skyView = new Float32Array(GRID * GRID);
   readonly height = new Float32Array(GRID * GRID);
@@ -191,6 +194,7 @@ export class Analysis {
         this.slope[o] = sumSlope / count;
         this.slopeMax[o] = maxSlope;
         this.roughness[o] = Math.sqrt(residual / count);
+        this.coarse[o] = field.coarse?.[Math.min(n - 1, j * block + (block >> 1)) * n + Math.min(n - 1, i * block + (block >> 1))] ?? 0;
       }
     }
     this.computeSkyView();
@@ -235,9 +239,9 @@ export class Analysis {
       let a = 55;
       if (slope >= profile.maxSlope) {
         [r, g, b, a] = [225, 40, 40, 215];
-      } else if (slope >= (profile.cautionSlope + profile.maxSlope) / 2) {
+      } else if (slope >= slopeLimits(profile.mode).steep) {
         [r, g, b, a] = [245, 120, 30, 190];
-      } else if (slope >= profile.cautionSlope || rough > 0.35) {
+      } else if (slope >= profile.cautionSlope || rough > 0.35 || this.coarse[o]) {
         [r, g, b, a] = [250, 205, 50, 160];
       }
       data.set([r, g, b, a], o * 4);

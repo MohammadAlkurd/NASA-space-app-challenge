@@ -12,7 +12,7 @@ export interface Constant {
   source: string;
 }
 
-const c = (value: number, unit: string, label: Label, what: string, source: string): Constant => ({ value, unit, label, what, source });
+export const c = (value: number, unit: string, label: Label, what: string, source: string): Constant => ({ value, unit, label, what, source });
 
 const SEXTANT = 'as coded in MIT SEXTANT (github.com/norheim/pextant)';
 const SP368 = 'Waligora & Horrigan, NASA SP-368 (NTRS 19760005584)';
@@ -34,6 +34,11 @@ export const MODEL = {
   marginal: c(20, '%', 'ASSUMPTION', 'A trip that leaves less than this is rated MARGINAL', 'Ours'),
   shelterWalk: c(60, 'min', 'ANALOG', 'Longest walk to a pressurised shelter if the suit CO₂ scrubber fails', 'NASA tested a 1 h, 2.0 km walk-back at 2.1 km/h or faster: Keller et al. 2024 (NTRS 20240013261)'),
   shelterPace: c(2.1, 'km/h', 'ANALOG', 'Walking pace assumed for that walk (slower on steep ground)', 'Slowest pace held in the same test: Keller et al. 2024 (NTRS 20240013261)'),
+  walkBackTest: c(10, 'km', 'ANALOG', 'Suited walk NASA tested as the way home from a broken-down rover', WALKBACK),
+  walkSlopeLimit: c(20, '°', 'ASSUMPTION', 'Steepest slope crossed on foot', 'Ours. The Marquez walking curve drops to a crawl beyond 15° uphill and 20° downhill'),
+  walkSlopeCare: c(12, '°', 'ASSUMPTION', 'Slope on foot where the going gets slow and slippery', 'Ours'),
+  roverSlopeLimit: c(25, '°', 'ASSUMPTION', 'Steepest slope driven in the crew rover', 'Ours: matches the steepest slopes the Apollo rovers drove (22 to 25°)'),
+  roverSlopeCare: c(15, '°', 'ASSUMPTION', 'Slope in the rover where the going gets slow and risky', 'Ours'),
   roverSpeed: c(2.0, 'm/s', 'ANALOG', 'Crew rover planning speed', 'Apollo 15 as-driven mean; best case 2.6 m/s. Speed showed no strong link to slope or roughness: Jacob et al. (NTRS 20250011301)'),
   roverMass: c(4000, 'kg', 'NASA STUDY', 'Crew rover with payload', 'NASA Space Exploration Vehicle fact sheet: 6,600 lb vehicle + 2,200 lb payload'),
   roverLevel: c(0.216, 'J/(kg·m)', 'ANALOG', 'Rover drive energy on level ground in lunar gravity', `Carr 2001, ${SEXTANT}; scaled by Mars/Moon gravity (ASSUMPTION)`),
@@ -41,7 +46,13 @@ export const MODEL = {
   roverDownhill: c(0.007884, 'J/(kg·m·deg)', 'ANALOG', 'Extra rover drive energy per degree downhill, lunar gravity', `Carr 2001, ${SEXTANT}`),
   roverElectronics: c(1500, 'W', 'ANALOG', 'Rover electronics power, counted while driving and during the stop', `SEXTANT default, ${SEXTANT}`),
   roverBattery: c(30, 'kWh', 'ASSUMPTION', 'Crew rover battery', 'Ours, adjustable'),
+  roverLights: c(100, 'W', 'ASSUMPTION', 'Rover headlights, while switched on', 'Ours: LED driving lamps'),
+  helmetLamp: c(5, 'W', 'ASSUMPTION', 'Helmet lamp, while switched on (counted against the suit budget)', 'Ours: LED headlamp'),
+  shelterDose: c(0.5, '×', 'ASSUMPTION', 'Share of the open-ground dose counted for a crew camped in the rover or sheltering at the lander', 'Ours: no measured figure for these cabins'),
+  safeZone: c(30, 'm', 'ASSUMPTION', 'Radius around the lander where the crew can shelter in it and refill the suit', 'Ours'),
   stormDose: c(3, '×', 'MEASURED', 'Dose rate in a solar particle storm, relative to normal (measured 2 to 3; the planner uses 3)', 'Curiosity RAD, September 2017: Zeitlin et al. 2018, doi:10.1029/2018GL077760'),
+  dustScaleHeight: c(11000, 'm', 'ASSUMPTION', 'Height the dust is taken to be mixed through, to turn the measured dust optical depth into how far you can see along the ground', 'Ours: the scale height of the Mars atmosphere (NASA Mars Fact Sheet, 11.1 km)'),
+  dustDevilPeak: c(1.15, '/h', 'MEASURED', 'Whirlwinds passing Perseverance per hour at the busiest time, 12:00 to 13:00 (over four per sol; about a quarter carry dust). The app draws them from 09:00 to 17:00 around that peak', 'Newman et al. 2022, doi:10.1126/sciadv.abn3783'),
   stormPeak: c(12, 'h', 'MEASURED', 'How long that storm stayed at its peak, after rising for several hours', 'Zeitlin et al. 2018'),
 } as const;
 
@@ -73,6 +84,13 @@ export function suitSupplies(usedJ: number): Supplies {
 }
 
 export type Mover = 'rover' | 'astronaut';
+
+/** Slope limits for a traveller: no-go at `limit`, slow going from `care`, and steep (close to the limit) from halfway between. */
+export function slopeLimits(mover: Mover): { limit: number; care: number; steep: number } {
+  const limit = mover === 'rover' ? MODEL.roverSlopeLimit.value : MODEL.walkSlopeLimit.value;
+  const care = mover === 'rover' ? MODEL.roverSlopeCare.value : MODEL.walkSlopeCare.value;
+  return { limit, care, steep: (limit + care) / 2 };
+}
 
 /** Suited walking speed in m/s on a slope of `gradeDeg` along the direction of travel, uphill positive (Marquez 2008). */
 export function marquezSpeed(gradeDeg: number): number {

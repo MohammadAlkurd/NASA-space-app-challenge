@@ -3,6 +3,7 @@ import type { TravelMode } from '../entities/Explorer';
 import type { LayerId } from '../planning/Analysis';
 import type { BaseScore } from '../planning/BaseSite';
 import { abortRules, checklistRows } from '../planning/Checklist';
+import type { Advice, SafetyRule } from '../planning/Safety';
 import { formatDuration, type Rating, type Route, type RoutePoint } from '../planning/Router';
 import { SITES, type GlobeSite } from '../world/Globe';
 import type { Stop } from '../world/Markers';
@@ -14,7 +15,7 @@ export type Tool = 'plan' | 'draw' | 'base';
 export interface Prompt {
   key: string;
   label: string;
-  action: 'interact' | 'camp';
+  action: 'interact' | 'camp' | 'lights';
 }
 
 export interface Telemetry {
@@ -28,6 +29,11 @@ export interface Telemetry {
   airTempC: number;
   groundTempC: number;
   windMs: number;
+  /** Direction the wind blows from, degrees clockwise from north; null when not measured. */
+  windFromDeg: number | null;
+  /** Dust optical depth. */
+  tau: number;
+  season: string;
   doseRate: number;
   doseTotal: number;
   /** 0..1 of suit energy or battery left. */
@@ -48,10 +54,14 @@ export interface Telemetry {
   cabinAirS: number;
   /** Set while the crew is sheltering inside the parked rover. */
   camping: boolean;
+  /** On foot inside the lander's safe zone. */
+  safe: boolean;
   prompts: Prompt[];
   map: MiniMap;
   /** Guidance while following a route. */
   guidance: string;
+  /** The most urgent safety rule that applies now; null when nothing is wrong. */
+  advice: Advice | null;
 }
 
 /** What the minimap shows; positions are map metres (+x east, +z south). */
@@ -90,6 +100,7 @@ export interface HudActions {
   interact(): void;
   /** Camp in the rover or break camp (the R key). */
   camp(): void;
+  lights(): void;
   /** A landing site chosen on the globe, by name. */
   pickSite(name: string): void;
   setHour(hour: number): void;
@@ -146,6 +157,8 @@ export class Hud {
   private timeScale = 1;
   private toastTimer = 0;
   private promptKey = '';
+  private rules: SafetyRule[] = [];
+  private activeRule = '';
   private nearStop: Stop | null = null;
   private readonly mapImage = new Image();
 
@@ -167,8 +180,8 @@ export class Hud {
             <span id="t-sol"></span><b id="t-clock"></b>
             <button id="speed" title="Time speed">×1</button>
           </div>
-          <div id="t-verdict" class="flag"><b></b><span></span></div>
           <div id="t-ground" class="flag" hidden><b></b><span></span></div>
+          <button id="advice" class="flag" data-open="guide" title="What to do now. Opens the safety guide (G)"><b></b><span></span><kbd>G</kbd></button>
         </div>
 
         <div id="mode" class="segmented">
@@ -197,22 +210,26 @@ export class Hud {
           <button id="stats-button" title="All readouts">${ICON_BARS}<span>Stats</span></button>
         </div>
 
-        <div id="tools" class="plan">
-          <div class="stack" id="tool-list">
-            <button data-tool="plan">Route</button>
-            <button data-tool="draw">Draw</button>
-            <button data-tool="base">Base</button>
+        <div id="dock" class="plan">
+          <div id="bar">
+            <div id="tools">
+              <div class="segmented" id="tool-list">
+                <button data-tool="plan">Route</button>
+                <button data-tool="draw">Draw</button>
+                <button data-tool="base">Base</button>
+              </div>
+              <button data-mode="globe">Landing site</button>
+              <button data-open="about">Sources</button>
+            </div>
+            <div id="layers">
+              <div id="layer-list" class="segmented"></div>
+              <label class="check"><input id="traverse" type="checkbox" checked /> Rover path</label>
+              <label class="check"><input id="limits" type="checkbox" checked /> Limits</label>
+            </div>
           </div>
-          <button data-mode="globe">Landing site</button>
-          <button data-open="about">Sources</button>
-        </div>
-        <aside id="layers" class="plan">
-          <div id="layer-list" class="stack"></div>
           <p id="legend" class="legend"></p>
-          <label class="check"><input id="traverse" type="checkbox" checked /> Rover path</label>
-          <label class="check"><input id="limits" type="checkbox" checked /> Walk-back limits</label>
-        </aside>
-        <section id="planner" class="plan"></section>
+          <section id="planner"></section>
+        </div>
 
         <section id="sites" class="globe"></section>
       </div>
@@ -228,6 +245,8 @@ export class Hud {
               <div><dt>Air</dt><dd id="t-air"></dd></div>
               <div><dt>Ground</dt><dd id="t-ground-temp"></dd></div>
               <div><dt>Wind</dt><dd id="t-wind"></dd></div>
+              <div><dt>Dust</dt><dd id="t-tau"></dd></div>
+              <div><dt>Season</dt><dd id="t-season"></dd></div>
             </dl></div>
             <div><h3>Radiation</h3><dl>
               <div><dt>Dose rate</dt><dd id="t-dose-rate"></dd></div>
@@ -253,8 +272,16 @@ export class Hud {
               <button data-scenario="dust">Dust storm</button>
               <button data-scenario="solar">Solar storm</button>
             </div>
+            <button data-open="guide">Safety guide</button>
             <button data-open="about">Sources</button>
           </div>
+        </div>
+      </section>
+      <section id="guide" class="overlay" hidden>
+        <div class="sheet">
+          <button class="close" data-close aria-label="Close">×</button>
+          <h2>Safety guide</h2>
+          <div id="guide-body"></div>
         </div>
       </section>
       <section id="card" class="overlay" hidden></section>
@@ -384,12 +411,35 @@ export class Hud {
   /** Close anything laid over the view. */
   /** The game stands still while the Stats sheet is open. */
   get paused(): boolean {
-    return !el(this.root, '#stats').hidden;
+    return !el(this.root, '#stats').hidden || !el(this.root, '#guide').hidden;
+  }
+
+  /** The safety rules the card, the guide and the checklist read. */
+  setSafetyRules(rules: SafetyRule[]): void {
+    this.rules = rules;
+    this.renderGuide();
+  }
+
+  /** The G key: open or close the safety guide. */
+  toggleGuide(): void {
+    const guide = el(this.root, '#guide');
+    guide.hidden = !guide.hidden;
+  }
+
+  private renderGuide(): void {
+    el(this.root, '#guide-body').innerHTML = `
+      <div class="rule head"><b>Signal</b><b>What to do</b><b>Why</b><b>Numbers and source</b></div>
+      ${this.rules.map((rule) => `<div class="rule" data-rule="${rule.id}">
+        <h3>${escapeHtml(rule.name)}<span class="chip">Now</span></h3>
+        <p>${escapeHtml(rule.signal)}</p><p class="do">${escapeHtml(rule.action)}</p><p>${escapeHtml(rule.why)}</p>
+        <ul>${rule.basis.map((b) => `<li><b>${b.value} ${escapeHtml(b.unit)}</b> <i>${b.label}</i> ${escapeHtml(b.what)}. ${escapeHtml(b.source)}</li>`).join('')}</ul>
+      </div>`).join('')}
+      <p class="hint">Listed most urgent first; the card shows the first one that applies. ASSUMPTION marks our own planning choices, not NASA limits.</p>`;
   }
 
   /** Esc closes whatever is open; with nothing open it pauses on the Stats sheet. */
   escape(): void {
-    const open = ['#card', '#photo', '#about', '#checklist'].map((id) => el(this.root, id)).filter((sheet) => !sheet.hidden);
+    const open = ['#guide', '#card', '#photo', '#about', '#checklist'].map((id) => el(this.root, id)).filter((sheet) => !sheet.hidden);
     if (open.length) {
       for (const sheet of open) sheet.hidden = true;
       return;
@@ -399,7 +449,7 @@ export class Hud {
   }
 
   closeOverlays(): void {
-    for (const id of ['#card', '#photo', '#about', '#checklist', '#stats']) el(this.root, id).hidden = true;
+    for (const id of ['#guide', '#card', '#photo', '#about', '#checklist', '#stats']) el(this.root, id).hidden = true;
   }
 
   setTelemetry(t: Telemetry): void {
@@ -410,10 +460,21 @@ export class Hud {
     const time = clock(t.hour);
     set('#t-sol', `Sol ${t.sol}`);
     set('#t-clock', `${time}:${String(Math.floor((t.hour * 3600) % 60)).padStart(2, '0')}`);
-    const verdict = el(this.root, '#t-verdict');
-    verdict.style.setProperty('--tone', t.camping ? 'var(--color-accent)' : t.verdict === 'GO' ? 'var(--color-safe)' : t.verdict === 'NO-GO' ? 'var(--color-nogo)' : 'var(--color-care)');
-    set('#t-verdict b', t.camping ? 'SHELTERED' : t.verdict);
-    set('#t-verdict span', t.verdict === 'GO' ? '' : t.verdictReason);
+    // One card: the most urgent action, else where the crew is sheltered, else the verdict's own caution.
+    const careful = !t.advice && t.verdict !== 'GO' && !t.camping && !t.safe;
+    const advice = el(this.root, '#advice');
+    advice.style.setProperty('--tone', t.advice ? (t.advice.tone === 'nogo' ? 'var(--color-nogo)' : 'var(--color-care)') : careful ? (t.verdict === 'NO-GO' ? 'var(--color-nogo)' : 'var(--color-care)') : 'var(--color-safe)');
+    advice.classList.toggle('alert', !!t.advice || careful);
+    set('#advice b', t.advice ? t.advice.action : careful ? (t.verdict === 'NO-GO' ? 'Stay in' : 'Take care') : 'All clear');
+    set('#advice span', t.advice ? `${t.advice.reason}: ${t.advice.number}`
+      : t.camping ? 'Camped in the rover. Suit refilling.'
+      : t.safe ? 'At the lander. Suit refilling.'
+      : careful ? t.verdictReason : '');
+    const active = t.advice?.id ?? '';
+    if (active !== this.activeRule) {
+      this.activeRule = active;
+      for (const row of this.root.querySelectorAll<HTMLElement>('#guide-body [data-rule]')) row.classList.toggle('active', row.dataset.rule === active);
+    }
     const ground = el(this.root, '#t-ground');
     ground.hidden = t.rating === 'SAFE';
     ground.style.setProperty('--tone', TONE[t.rating]);
@@ -441,7 +502,10 @@ export class Hud {
     // The rest sits in the Stats sheet.
     set('#t-air', `${t.airTempC.toFixed(0)} °C`);
     set('#t-ground-temp', `${t.groundTempC.toFixed(0)} °C`);
-    set('#t-wind', `${t.windMs.toFixed(1)} m/s`);
+    const compass = t.windFromDeg === null ? '' : ` from ${['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(t.windFromDeg / 45) % 8]}`;
+    set('#t-wind', `${t.windMs.toFixed(1)} m/s${compass}`);
+    set('#t-tau', `τ ${t.tau.toFixed(2)}`);
+    set('#t-season', t.season);
     set('#t-dose-rate', `${t.doseRate.toFixed(1)} µSv/h`);
     set('#t-dose-trip', `${t.doseTotal.toFixed(1)} µSv`);
     const space = el(this.root, '#t-space');
@@ -719,6 +783,12 @@ export class Hud {
       </table>
       <h2>Abort rules</h2>
       <ul class="rules">${abortRules(route, rows).map((rule) => `<li>${escapeHtml(rule)}</li>`).join('')}</ul>
+      <h2>Safety rules</h2>
+      <table class="legs safety">
+        <thead><tr><th>If</th><th>Do</th><th>Why</th><th>Numbers</th></tr></thead>
+        <tbody>${this.rules.map((rule) => `<tr><td>${escapeHtml(rule.signal)}</td><td><b>${escapeHtml(rule.action)}</b></td><td>${escapeHtml(rule.why)}</td>
+          <td>${rule.basis.map((b) => `${b.value} ${escapeHtml(b.unit)} ${b.label}`).join('<br>')}</td></tr>`).join('')}</tbody>
+      </table>
       <p class="hint">Percentages are what is left. ${rover ? '' : 'Oxygen and cooling water follow effort, using the Apollo backpack rates and tank sizes listed in Sources. '}"Go on only above" is the least ${rover ? 'battery' : 'suit energy'} needed at that point to finish the plan and keep the 20 % reserve. Times and dose are for the weather set now.</p>
       <div class="row"><button data-sheet="print" class="primary">Print</button><button data-sheet="close">Close</button></div>`;
     sheet.hidden = false;
@@ -736,6 +806,7 @@ export class Hud {
     if (sheet === 'print') return window.print();
     if (sheet === 'close') return void (el(this.root, '#checklist').hidden = true);
     if (target.closest('[data-open="about"]')) return void (el(this.root, '#about').hidden = false);
+    if (target.closest('[data-open="guide"]')) return void (el(this.root, '#guide').hidden = false);
     const mode = target.closest<HTMLElement>('button[data-mode]')?.dataset.mode as Mode | undefined;
     if (mode) return this.actions.setMode(mode);
     const scenario = target.closest<HTMLElement>('[data-scenario]')?.dataset.scenario as 'clear' | 'dust' | 'solar' | undefined;
@@ -743,7 +814,7 @@ export class Hud {
     const layer = target.closest<HTMLElement>('[data-layer]')?.dataset.layer as LayerId | undefined;
     if (layer) return this.actions.setLayer(layer);
     const prompt = target.closest<HTMLElement>('[data-prompt]')?.dataset.prompt;
-    if (prompt) return prompt === 'camp' ? this.actions.camp() : this.actions.interact();
+    if (prompt) return prompt === 'camp' ? this.actions.camp() : prompt === 'lights' ? this.actions.lights() : this.actions.interact();
     if (target.closest('[data-land]')) return this.actions.start();
     const site = target.closest<HTMLElement>('[data-site]')?.dataset.site;
     if (site) return this.actions.pickSite(site);

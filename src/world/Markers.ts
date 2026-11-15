@@ -124,6 +124,7 @@ export class Markers {
   showLimits = true;
   private readonly traverse = new THREE.Group();
   private readonly limits = new THREE.Group();
+  private readonly safeZone = new THREE.Group();
   private readonly routes = new THREE.Group();
   /** The routes not picked: shown on the map only. */
   private readonly others = new THREE.Group();
@@ -136,7 +137,7 @@ export class Markers {
   private mapView: boolean | null = null;
 
   constructor(private readonly site: SiteData, readonly mission: Mission) {
-    this.group.add(this.traverse, this.limits, this.others, this.routes, this.stops, this.pins);
+    this.group.add(this.traverse, this.limits, this.safeZone, this.others, this.routes, this.stops, this.pins);
     for (const path of mission.traverse.paths) {
       this.traverse.add(this.line(path.map(([x, z]) => ({ x, z })), () => '#7fd8ff', 1.5, 0.75));
     }
@@ -213,6 +214,17 @@ export class Markers {
     this.applyView();
   }
 
+  /** Thin ring on the ground marking the lander's safe zone. */
+  setSafeZone(center: RoutePoint, radius: number): void {
+    this.clear(this.safeZone);
+    const points: RoutePoint[] = [];
+    for (let k = 0; k <= 72; k += 1) points.push({ x: center.x + Math.cos((k / 36) * Math.PI) * radius, z: center.z + Math.sin((k / 36) * Math.PI) * radius });
+    const ring = this.line(points, () => '#5ee6c8', 1.5, 0.75);
+    ring.renderOrder = 9;
+    this.safeZone.add(ring);
+    this.applyView();
+  }
+
   setBase(point: RoutePoint): void {
     this.base.position.set(point.x, this.site.groundAt(point.x, point.z) + 2, point.z);
   }
@@ -240,7 +252,7 @@ export class Markers {
       this.applyView();
     }
     this.traverse.visible = this.showTraverse && mapView;
-    this.limits.visible = this.showLimits;
+    this.limits.visible = this.showLimits && mapView;
     this.others.visible = mapView;
     this.you.visible = mapView;
     if (mapView) {

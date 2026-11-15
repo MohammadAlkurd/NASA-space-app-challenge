@@ -1,44 +1,73 @@
 import * as THREE from 'three';
 import type { SiteData } from '../world/SiteData';
+import { disposeModel, loadModel, materialNamed } from '../world/Models';
 import { Explorer, PROFILES } from './Explorer';
 
-/** Suited crew member on foot. Simple original figure built from primitives. */
+/** A camera looks down -Z; the lamp rig points down +Z. */
+const FLIP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+const EYE = 1.72;
+/** Arms hang slightly forward at rest, as a pressurised suit holds them. */
+const ARM_REST = 0.5;
+
+/**
+ * Suited crew member on foot. The model is NASA's Mark III planetary suit (NASA 3D Resources),
+ * reduced for the web, with a few bones added so the legs and arms swing while walking.
+ */
 export class Astronaut extends Explorer {
   readonly group = new THREE.Group();
   readonly eye = new THREE.Vector3();
-  private readonly legs: THREE.Mesh[] = [];
+  /** Helmet lamp beam. Kept outside `group` so it still shines in the helmet view, where the body is hidden. */
+  readonly lights = new THREE.Group();
+  private readonly beam = new THREE.SpotLight(0xeaf4ff, 0, 32, 0.6, 0.7, 1.6);
+  private readonly lamp: THREE.MeshStandardMaterial;
+  private readonly bones: Record<'hips' | 'thighL' | 'shinL' | 'thighR' | 'shinR' | 'armL' | 'armR', THREE.Object3D>;
+  private readonly hipsY: number;
   private stride = 0;
 
-  constructor(site: SiteData) {
+  private constructor(site: SiteData, private readonly model: THREE.Object3D) {
     super(site, PROFILES.astronaut);
-    const suit = new THREE.MeshStandardMaterial({ color: '#efe9df', roughness: 0.8 });
-    const trim = new THREE.MeshStandardMaterial({ color: '#d2571f', roughness: 0.7 });
-    const visor = new THREE.MeshStandardMaterial({ color: '#c79a2c', roughness: 0.15, metalness: 0.9 });
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.27, 0.45, 6, 12), suit);
-    torso.position.y = 1.18;
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.23, 20, 14), suit);
-    helmet.position.y = 1.7;
-    const face = new THREE.Mesh(new THREE.SphereGeometry(0.19, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.62), visor);
-    face.rotation.x = Math.PI / 2;
-    face.position.set(0, 1.71, 0.07);
-    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.62, 0.22), suit);
-    pack.position.set(0, 1.28, -0.3);
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.08, 0.24), trim);
-    stripe.position.set(0, 1.5, -0.3);
-    this.group.add(torso, helmet, face, pack, stripe);
-    for (const side of [-1, 1]) {
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.5, 4, 8), suit);
-      arm.position.set(side * 0.37, 1.15, 0);
-      arm.rotation.z = side * 0.12;
-      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.55, 4, 8), suit);
-      leg.geometry.translate(0, -0.38, 0);
-      leg.position.set(side * 0.14, 0.86, 0);
-      this.legs.push(leg);
-      this.group.add(arm, leg);
-    }
-    this.group.traverse((object) => {
-      object.castShadow = true;
+    this.group.add(model);
+    model.traverse((object) => {
+      // The bind-pose bounds do not follow the bones, so never cull the suit.
+      if ((object as THREE.SkinnedMesh).isSkinnedMesh) object.frustumCulled = false;
     });
+    const bone = (name: string): THREE.Object3D => {
+      const node = model.getObjectByName(name);
+      if (!node) throw new Error(`astronaut model has no "${name}" bone`);
+      return node;
+    };
+    this.bones = {
+      hips: bone('hips'), thighL: bone('thighL'), shinL: bone('shinL'), thighR: bone('thighR'), shinR: bone('shinR'), armL: bone('armL'), armR: bone('armR'),
+    };
+    this.hipsY = this.bones.hips.position.y;
+    this.lamp = materialNamed(model, 'lamp')!;
+    this.lamp.emissive.set(0xeaf4ff);
+    this.lamp.emissiveIntensity = 0;
+    this.beam.position.set(0, 0.2, 0.15);
+    this.beam.target.position.set(0, -1.6, 9);
+    this.lights.add(this.beam, this.beam.target);
+    this.pose(0);
+  }
+
+  static async create(site: SiteData): Promise<Astronaut> {
+    return new Astronaut(site, (await loadModel('astronaut')).scene);
+  }
+
+  dispose(): void {
+    disposeModel(this.model);
+  }
+
+  /** Helmet lamp. The light stays in the scene at zero strength so switching costs no shader rebuild. */
+  setLight(on: boolean): void {
+    this.beam.intensity = on ? 80 : 0;
+    this.lamp.emissiveIntensity = on ? 3 : 0;
+  }
+
+  /** Point the lamp where the helmet looks: along the camera in the helmet view, along the heading otherwise. */
+  aimLight(camera: THREE.Camera | null): void {
+    this.lights.position.copy(this.eye);
+    if (camera) this.lights.quaternion.copy(camera.quaternion).multiply(FLIP);
+    else this.lights.rotation.set(0, this.heading, 0);
   }
 
   protected readonly turnRate = 1.5;
@@ -46,17 +75,28 @@ export class Astronaut extends Explorer {
   protected refresh(dt: number): void {
     this.stride += Math.abs(this.speed) * dt * 1.4;
     const swing = Math.min(1, Math.abs(this.speed) / 3) * 0.6;
-    this.legs[0].rotation.x = Math.sin(this.stride) * swing;
-    this.legs[1].rotation.x = -Math.sin(this.stride) * swing;
+    this.pose(Math.sin(this.stride) * swing / 0.6);
     this.group.position.copy(this.position);
     this.group.rotation.y = this.heading;
-    this.eye.set(this.position.x, this.position.y + 1.72, this.position.z);
+    this.eye.set(this.position.x, this.position.y + EYE, this.position.z);
   }
 
   override place(x: number, z: number, heading?: number): void {
     super.place(x, z, heading);
     this.group.position.copy(this.position);
     this.group.rotation.y = this.heading;
-    this.eye.set(this.position.x, this.position.y + 1.72, this.position.z);
+    this.eye.set(this.position.x, this.position.y + EYE, this.position.z);
+  }
+
+  /** Walk cycle from -1 to 1: thighs and arms swing in opposition, the trailing knee bends, the body bobs. */
+  private pose(k: number): void {
+    const b = this.bones;
+    b.armL.rotation.x = ARM_REST + 0.35 * k;
+    b.armR.rotation.x = ARM_REST - 0.35 * k;
+    b.thighL.rotation.x = -0.45 * k;
+    b.thighR.rotation.x = 0.45 * k;
+    b.shinL.rotation.x = 0.5 * Math.max(0, -k);
+    b.shinR.rotation.x = 0.5 * Math.max(0, k);
+    b.hips.position.y = this.hipsY - 0.03 * k * k;
   }
 }

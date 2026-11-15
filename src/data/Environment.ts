@@ -5,6 +5,17 @@ export interface EnvironmentTable {
   sol: number;
   /** Latitude the sun stands over on that sol, degrees. */
   subsolarLatDeg?: number;
+  /** Solar longitude on that sol, degrees: 0 is northern spring equinox, 180-360 is dust-storm season. */
+  lsDeg?: number;
+  /** Measured dust optical depth at 880 nm on (or nearest to) that sol. */
+  tau?: number;
+  tauSol?: number;
+  tauSource?: string;
+  /** Dust optical depth the dust-storm drill replays. */
+  stormTau?: number;
+  stormTauSource?: string;
+  /** Direction the wind blows from, degrees clockwise from north, by local hour. Absent when the station's data is not trustworthy. */
+  windDirDeg?: number[];
   airTempC: number[];
   groundTempC: number[];
   pressurePa: number[];
@@ -17,7 +28,12 @@ export interface Weather {
   groundTempC: number;
   pressurePa: number;
   windMs: number;
+  /** Direction the wind blows from, degrees clockwise from north; null when it was not measured. */
+  windFromDeg: number | null;
   humidityPct: number;
+  /** Dust optical depth on the measured sol, and in the dust-storm drill. */
+  tau: number;
+  stormTau: number;
   /** Modelled, not measured. */
   uvIndex: number;
   sunElevationDeg: number;
@@ -42,6 +58,16 @@ function lerpHour(values: number[], hour: number): number {
   return values[i] + (values[(i + 1) % 24] - values[i]) * (h - i);
 }
 
+/** Interpolates a compass bearing the short way round. */
+function lerpBearing(values: number[], hour: number): number {
+  const h = ((hour % 24) + 24) % 24;
+  const i = Math.floor(h);
+  const turn = ((values[(i + 1) % 24] - values[i] + 540) % 360) - 180;
+  return (values[i] + turn * (h - i) + 360) % 360;
+}
+
+export type Season = { lsDeg: number; name: string; dustSeason: boolean; cloudSeason: number };
+
 /** Weather-station table (MEDA or REMS) by local hour, sun position, and NASA DONKI space-weather alerts. */
 export class Environment {
   spaceWeather: SpaceWeather = { status: 'loading', headline: 'Checking NASA DONKI...', detail: '' };
@@ -52,6 +78,31 @@ export class Environment {
     const response = await fetch(`${baseUrl}environment.json`);
     if (!response.ok) throw new Error(`Failed to load weather table: ${response.status}`);
     return new Environment((await response.json()) as EnvironmentTable, latitudeDeg);
+  }
+
+  /** Dust optical depth measured on the weather sol. */
+  get tau(): number {
+    return this.table.tau ?? 0.5;
+  }
+
+  /** Where the dust-storm drill's optical depth was measured. */
+  get stormTauSource(): string {
+    return this.table.stormTauSource ?? 'Curiosity Mastcam, 2018 global dust storm (Guzewich et al. 2019)';
+  }
+
+  /** The Martian season on the weather sol, from its solar longitude. */
+  get season(): Season {
+    const lsDeg = this.table.lsDeg ?? 90;
+    const north = ['spring', 'summer', 'autumn', 'winter'][Math.floor(lsDeg / 90) % 4];
+    const south = ['autumn', 'winter', 'spring', 'summer'][Math.floor(lsDeg / 90) % 4];
+    return {
+      lsDeg,
+      name: this.latitudeDeg >= 0 ? `northern ${north}` : `southern ${south}`,
+      // Regional and global dust storms start in the southern spring and summer (Ls 180-360).
+      dustSeason: lsDeg >= 180,
+      // Thin water-ice clouds band the tropics around aphelion (Ls about 40-140).
+      cloudSeason: THREE.MathUtils.smoothstep(lsDeg, 40, 60) * (1 - THREE.MathUtils.smoothstep(lsDeg, 120, 140)),
+    };
   }
 
   /** Conditions at a local mean solar hour (0..24). */
@@ -71,6 +122,9 @@ export class Environment {
       groundTempC: lerpHour(this.table.groundTempC, hour),
       pressurePa: lerpHour(this.table.pressurePa, hour),
       windMs: lerpHour(this.table.windMs, hour),
+      windFromDeg: this.table.windDirDeg ? lerpBearing(this.table.windDirDeg, hour) : null,
+      tau: this.tau,
+      stormTau: this.table.stormTau ?? 8.5,
       humidityPct: lerpHour(this.table.humidityPct, hour),
       // Clear-sky estimate: Mars has almost no ozone, so UV scales with the sun's height; ~11 with the sun overhead.
       uvIndex: Math.max(0, 11 * Math.pow(Math.max(0, sinElevation), 1.2)),

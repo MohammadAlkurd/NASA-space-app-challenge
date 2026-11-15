@@ -16,14 +16,15 @@ import {
   type Route, type RoutePoint, type TripContext,
 } from '../planning/Router';
 import { Contingency } from '../planning/Contingency';
+import { advise, safetyRules, type SafetyRule } from '../planning/Safety';
 import { MODEL, SHELTER_WALK_S, SUIT_ENERGY_J, SUIT_WORK_S, WORK_RATE_W, gradeDeg, pace, travelEnergyJ } from '../planning/Models';
 import { clock, timeRoute } from '../planning/Timeline';
-import { Hud, type Tool, type ViewId } from '../ui/Hud';
+import { Hud, type Prompt, type Tool, type ViewId } from '../ui/Hud';
 import { Globe, SITES } from '../world/Globe';
 import { Markers, type Mission, type Stop } from '../world/Markers';
 import { Rocks } from '../world/Rocks';
 import { loadSite, type SiteData } from '../world/SiteData';
-import { DUST_COLOR, STORM_COLOR, Sky } from '../world/Sky';
+import { DUST_COLOR, Sky, stormLevel } from '../world/Sky';
 import { Weather } from '../world/Weather';
 import { Terrain } from '../world/Terrain';
 
@@ -39,17 +40,22 @@ const RESUPPLY_RANGE = 40;
 const TRANSFER_SPEED = 5;
 /** Close enough to the rover to climb in, metres. */
 const BOARD_RANGE = 20;
-/** Share of the open-ground dose that reaches a crew camped inside the rover (modelled). */
-const CAMP_DOSE_FACTOR = 0.5;
+const CAMP_DOSE_FACTOR = MODEL.shelterDose.value;
+/** On foot this close to the lander, the crew is in its safe zone, metres. */
+const SAFE_RANGE = MODEL.safeZone.value;
+const LIGHTS_KEY = 'mbe.lights';
 const CAMP_TIME_SCALE = 600;
 /** Where the lander stands relative to the base marker, metres. */
 const LANDER_OFFSET = { x: 16, z: -14 };
 /** Where the rover parks relative to the base marker, so the marker's beam stays clear of it. */
 const ROVER_OFFSET = { x: -1, z: -7 };
-/** Heading that points the astronaut's start position (4 m west, 5 m south of the base) at the lander. */
 /** Stepping out of the planning map within this distance of the rover, the crew faces it. */
 const FACE_ROVER_RANGE = 60;
-const FACE_LANDER = Math.atan2(LANDER_OFFSET.x + 4, LANDER_OFFSET.z - 5);
+
+/** Screen height the Plan dock covers, so framed routes stay clear of it. The route cards are not drawn yet when the first routes are framed, hence the floor. */
+function dockHeight(): number {
+  return Math.max(400, document.querySelector('#dock')?.getBoundingClientRect().height ?? 0);
+}
 
 export class Game {
   private readonly renderer: THREE.WebGLRenderer;
@@ -102,7 +108,7 @@ export class Game {
   private destination: RoutePoint | null = null;
   private base: RoutePoint = { x: 0, z: 0 };
   private scenario: Scenario = 'clear';
-  private readonly fogDay = new THREE.Color(DUST_COLOR);
+  private tau = 0.5;
   private conditions: Conditions | null = null;
   private drawPoints: RoutePoint[] = [];
   private lastBase: BaseScore | null = null;
@@ -127,7 +133,12 @@ export class Game {
   private limitsKey = '';
   private limitsTimer = 0;
   private sunsetWarned = false;
+  private lampOn = false;
+  private headlightsOn = false;
+  private daylight = 1;
+  private respawnTimer = 0;
   private camping = false;
+  private safety: SafetyRule[] = [];
   private campWasNoGo = false;
   private scaleBeforeCamp = 5;
   private readonly lastPosition = new THREE.Vector3();
@@ -186,6 +197,7 @@ export class Game {
       setBaseHere: () => this.lastBase && this.setBase(this.lastBase),
       returnToBase: () => this.planTo(this.base),
       interact: () => this.interact(),
+      lights: () => this.toggleLights(),
       camp: () => this.toggleCamp(),
       pickSite: (name) => this.selectSite(name),
     }, `${import.meta.env.BASE_URL}data/${this.homeSite.id}/`, `${import.meta.env.BASE_URL}data/globe/sites/`);
@@ -211,15 +223,17 @@ export class Game {
     this.sky = new Sky(30000);
     this.scene.add(this.sky.group);
     const base = this.site.baseUrl;
-    const [terrain, rover, environment, mission, thermal] = await Promise.all([
+    const [terrain, rover, astronaut, environment, mission, thermal] = await Promise.all([
       Terrain.create(this.site),
       Rover.create(this.site),
+      Astronaut.create(this.site),
       Environment.load(base, this.site.meta.centerLat),
       fetch(`${base}mission.json`).then((response) => response.json() as Promise<Mission>),
       loadGray(`${base}thermal.png`),
     ]);
     this.terrain = terrain;
     this.rover = rover;
+    this.astronaut = astronaut;
     this.environment = environment;
     this.hud.setLoadStatus('Working out slopes and shelter...');
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -227,14 +241,15 @@ export class Game {
     this.analysis.setThermal(thermal.pixels, thermal.size);
     this.router = new Router(this.analysis);
     this.homeOnFoot = new Contingency(this.analysis);
+    this.safety = safetyRules(environment.at(12).stormTau, environment.stormTauSource);
+    this.hud.setSafetyRules(this.safety);
     this.homeFromRover = new Contingency(this.analysis);
     this.markers = new Markers(this.site, mission);
     this.scorer = new BaseSiteScorer(this.analysis, mission.stops);
-    this.astronaut = new Astronaut(this.site);
     this.rocks = new Rocks(this.site, this.analysis);
     this.weather = new Weather(this.site);
     this.lander = new Lander(this.site);
-    this.scene.add(this.terrain.group, this.rocks.mesh, this.weather.group, this.rover.group, this.astronaut.group, this.lander.group, this.markers.group);
+    this.scene.add(this.terrain.group, this.rocks.mesh, this.weather.group, this.rover.group, this.rover.lights, this.astronaut.group, this.astronaut.lights, this.lander.group, this.markers.group);
     this.rig = new CameraRig(this.camera, this.site);
 
     // Start where the site's NASA rover landed, the rover parked and the astronaut beside it.
@@ -242,9 +257,14 @@ export class Game {
     this.rover.place(landing.x + ROVER_OFFSET.x, landing.z + ROVER_OFFSET.z, -Math.PI / 2);
     this.base = { x: landing.x, z: landing.z };
     this.markers.setBase(this.base);
-    this.lander.place(landing.x + LANDER_OFFSET.x, landing.z + LANDER_OFFSET.z);
     this.refreshSolarDay();
-    this.astronaut.place(landing.x - 4, landing.z + 5, FACE_LANDER);
+    this.placeLander();
+    try {
+      const saved = JSON.parse(localStorage.getItem(LIGHTS_KEY) ?? '{}');
+      this.lampOn = Boolean(saved.lamp);
+      this.headlightsOn = Boolean(saved.rover);
+    } catch { /* no saved lights */ }
+    this.rover.setLights(this.headlightsOn);
     this.lastPosition.copy(this.astronaut.position);
     this.rig.distance = 11;
 
@@ -486,7 +506,7 @@ export class Game {
   private tripContext(): TripContext {
     const rover = this.traveller === 'rover';
     // On foot the parked rover is a shelter too; a rover trip is checked against a walk back to the lander.
-    const shelters = rover ? [this.base] : [this.base, { x: this.rover.position.x, z: this.rover.position.z }];
+    const shelters = rover ? [this.base] : [this.base, this.landerPoint, { x: this.rover.position.x, z: this.rover.position.z }];
     const contingency = rover ? this.homeFromRover : this.homeOnFoot;
     const speedFactor = this.conditions?.speedFactor ?? 1;
     contingency.update(shelters, speedFactor);
@@ -504,7 +524,10 @@ export class Game {
 
   /** A storm drill: the parked rover is the shelter, so point the crew at it. */
   private stormAlert(scenario: Scenario): void {
-    const name = scenario === 'dust' ? 'Dust storm' : 'Solar storm';
+    const season = this.environment.season;
+    // Big dust storms start in the southern spring and summer; outside that season the drill is an unlikely case.
+    const name = scenario === 'solar' ? 'Solar storm'
+      : `Dust storm (${season.dustSeason ? 'in season' : 'rare this season'}, Ls ${season.lsDeg.toFixed(0)}°)`;
     if (this.camping) {
       this.hud.toast(`${name} alert. You are sheltered in the rover: stay put.`);
       return;
@@ -515,6 +538,17 @@ export class Game {
       return;
     }
     const away = this.roverDistance();
+    const toLander = this.landerDistance();
+    if (toLander <= SAFE_RANGE) {
+      this.stopFollowing();
+      this.hud.toast(`${name} alert. You are in the lander's safe zone: stay here.`);
+      return;
+    }
+    if (toLander < away) {
+      this.planTo(this.lander.ladderFoot);
+      this.hud.toast(`${name} alert. Shelter is the lander, ${Math.round(toLander)} m away: press Go.`);
+      return;
+    }
     if (away <= BOARD_RANGE) {
       this.stopFollowing();
       this.hud.toast(`${name} alert. The rover is beside you: press E to enter, then R to camp.`);
@@ -618,8 +652,7 @@ export class Game {
   }
 
   private frameAround(point: RoutePoint, radius: number): void {
-    const wide = window.innerWidth > 860;
-    this.rig.frame(point.x - radius, point.x + radius, point.z - radius, point.z + radius, wide ? 190 : 0, wide ? 330 : 360);
+    this.rig.frame(point.x - radius, point.x + radius, point.z - radius, point.z + radius, 0, dockHeight());
   }
 
   private frameRoutes(): void {
@@ -635,8 +668,7 @@ export class Game {
         maxZ = Math.max(maxZ, point.z);
       }
     }
-    const wide = window.innerWidth > 860;
-    this.rig.frame(minX, maxX, minZ, maxZ, wide ? 190 : 0, wide ? 330 : 360);
+    this.rig.frame(minX, maxX, minZ, maxZ, 0, dockHeight());
   }
 
   private selectRoute(index: number): void {
@@ -693,15 +725,64 @@ export class Game {
     return planned;
   }
 
+  /** Stand the lander by the base, ring its safe zone and put the crew at the foot of its ladder, facing the rover. */
+  private placeLander(): void {
+    this.lander.place(this.base.x + LANDER_OFFSET.x, this.base.z + LANDER_OFFSET.z);
+    this.markers.setSafeZone(this.landerPoint, SAFE_RANGE);
+    this.spawnAtLander();
+  }
+
+  private get landerPoint(): RoutePoint {
+    return { x: this.lander.group.position.x, z: this.lander.group.position.z };
+  }
+
+  private spawnAtLander(): void {
+    const foot = this.lander.ladderFoot;
+    this.astronaut.place(foot.x, foot.z, Math.atan2(this.rover.position.x - foot.x, this.rover.position.z - foot.z));
+  }
+
+  private landerDistance(): number {
+    return Math.hypot(this.astronaut.position.x - this.lander.group.position.x, this.astronaut.position.z - this.lander.group.position.z);
+  }
+
+  /** On foot inside the ring around the lander: the suit refills and the crew counts as sheltered. */
+  private get inSafeZone(): boolean {
+    return this.traveller === 'astronaut' && !this.transfer && this.landerDistance() <= SAFE_RANGE;
+  }
+
+  /** The F key: the helmet lamp on foot, the headlights in the rover. */
+  private toggleLights(): void {
+    if (!this.started || this.globe) return;
+    const on = this.traveller === 'rover' ? (this.headlightsOn = !this.headlightsOn) : (this.lampOn = !this.lampOn);
+    this.rover.setLights(this.headlightsOn);
+    try {
+      localStorage.setItem(LIGHTS_KEY, JSON.stringify({ lamp: this.lampOn, rover: this.headlightsOn }));
+    } catch { /* storage is optional */ }
+    this.hud.toast(`${this.traveller === 'rover' ? 'Headlights' : 'Helmet lamp'} ${on ? 'on' : 'off'}`);
+  }
+
+  /** Out of suit energy on foot: the crew is brought back to the lander. The mission clock keeps running. */
+  private rescue(): void {
+    this.transfer = null;
+    this.rover.setDoor(false);
+    this.stopFollowing();
+    this.clearRoutes();
+    this.respawnTimer = 1.2;
+    if (this.fade) this.fade.style.opacity = '1';
+    this.spawnAtLander();
+    this.lastPosition.copy(this.astronaut.position);
+    this.suitJ = 0;
+    this.hud.toast('Suit energy ran out. You were brought back to the lander and the suit is refilled.');
+  }
+
   /** Move the base (and the parked rover) here and start a fresh walk from it. */
   private setBase(point: RoutePoint): void {
     this.clearRoutes();
     this.base = { x: point.x, z: point.z };
     this.markers.setBase(this.base);
     this.breakCamp();
-    this.lander.place(point.x + LANDER_OFFSET.x, point.z + LANDER_OFFSET.z);
     this.rover.place(point.x + ROVER_OFFSET.x, point.z + ROVER_OFFSET.z, this.rover.heading);
-    this.astronaut.place(point.x - 4, point.z + 5, FACE_LANDER);
+    this.placeLander();
     this.lastPosition.copy(this.active.position);
     this.doseTotal = 0;
     this.suitJ = 0;
@@ -730,8 +811,8 @@ export class Game {
     const elevation = (x: number, z: number) => this.site.elevationAt(x, z);
     const storm = this.conditions?.doseFactor ?? 1;
     const text = format === 'geojson'
-      ? toGeoJSON(route, toLatLon, elevation, this.active.profile.label, this.hour, storm)
-      : toCSV(route, toLatLon, elevation, this.hour, storm);
+      ? toGeoJSON(route, toLatLon, elevation, this.active.profile.label, this.hour, storm, this.safety)
+      : toCSV(route, toLatLon, elevation, this.hour, storm, this.safety);
     const blob = new Blob([text], { type: format === 'geojson' ? 'application/geo+json' : 'text/csv' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -861,11 +942,13 @@ export class Game {
 
     const paused = this.started && this.hud.paused;
     if (this.input.consume('Escape') && this.started) this.hud.escape();
+    if (this.input.consume('KeyG') && this.started) this.hud.toggleGuide();
     if (this.started && !paused) {
       if (this.input.consume('KeyC')) this.setCamera(this.rig.mode === 'first' ? 'chase' : 'first');
       if (this.input.consume('KeyM')) this.setCamera(this.rig.mode === 'map' ? this.groundMode : 'map');
       if (this.input.consume('KeyE')) this.interact();
       if (this.input.consume('KeyR')) this.toggleCamp();
+      if (this.input.consume('KeyF')) this.toggleLights();
       const manual = this.input.throttle !== 0 || this.input.steer !== 0;
       if (this.following && manual) this.stopFollowing();
       if (this.transfer) this.stepTransfer(real);
@@ -884,23 +967,22 @@ export class Game {
     }
 
     const weather = this.environment.at(this.hour);
-    this.sky.setSun(Math.max(7, weather.sunElevationDeg), weather.sunAzimuthDeg);
     this.conditions = assess(this.scenario, weather, this.environment.spaceWeather);
-    // The storm rolls in and clears over a few seconds instead of switching.
-    this.storm += ((this.conditions.haze > 1 ? 1 : 0) - this.storm) * Math.min(1, real * 0.7);
-    const storm = this.storm < 0.002 ? 0 : this.storm;
+    // The dust rolls in and clears over a few seconds instead of switching.
+    this.tau += (this.conditions.tau - this.tau) * Math.min(1, real * 0.7);
+    if (Math.abs(this.conditions.tau - this.tau) < 0.005) this.tau = this.conditions.tau;
+    this.storm = stormLevel(this.tau);
+    const storm = this.storm;
     const mapHeight = this.rig.mode === 'map' ? this.rig.mapHeight : 0;
-    // On the ground a storm cuts visibility to about a hundred metres; the map only gets a dust tint so it stays usable.
-    const stormFog = mapHeight > 0 ? 0.7 / mapHeight : 0.014;
-    (this.scene.fog as THREE.FogExp2).density = THREE.MathUtils.lerp(0.00011, stormFog, storm);
-    // Daylight fades to a dim twilight level through sunset so the night is readable but clearly dark.
-    const daylight = THREE.MathUtils.smoothstep(weather.sunElevationDeg, -6, 8);
-    this.sky.sun.intensity = (1.2 + 2.4 * Math.sin(THREE.MathUtils.degToRad(Math.max(7, weather.sunElevationDeg)))) * daylight * (1 - 0.65 * storm);
-    this.sky.ambient.intensity = 1.15 * (0.3 + 0.7 * daylight) * (1 - 0.3 * storm);
+    const fog = this.scene.fog as THREE.FogExp2;
+    // Haze thickens with the dust in the air; the map only gets a dust tint so it stays usable.
+    // Dust spread evenly through one scale height dims a line of sight by tau / height per metre. The 0.506 makes
+    // three.js's squared fog lose 98 % of the contrast at the same distance; clear air keeps the old 18 km floor.
+    const haze = Math.max(0.00011, (0.506 * this.tau) / MODEL.dustScaleHeight.value);
+    fog.density = mapHeight > 0 ? Math.min(haze, THREE.MathUtils.lerp(0.00011, 0.7 / mapHeight, storm)) : haze;
+    const daylight = this.sky.setConditions(weather.sunElevationDeg, weather.sunAzimuthDeg, this.tau, this.environment.season.cloudSeason, real);
     this.renderer.toneMappingExposure = 1.05 * (0.5 + 0.5 * daylight);
-    this.sky.setDaylight(daylight);
-    (this.scene.fog as THREE.FogExp2).color.copy(this.fogDay).lerp(STORM_COLOR, storm).multiplyScalar(0.04 + 0.96 * daylight);
-    this.sky.setStorm(storm, (this.scene.fog as THREE.FogExp2).color);
+    fog.color.copy(this.sky.fog);
 
     if (this.traveller === 'rover') this.rover.mastCamera.getWorldPosition(this.eye);
     else this.eye.copy(this.astronaut.eye);
@@ -916,10 +998,18 @@ export class Game {
     }
     this.rover.setCabinLight(this.traveller === 'rover' ? (this.camping ? 1.6 : 0.5) * (1.2 - daylight) : 0);
     this.rover.animate(real);
+    this.daylight = daylight;
+    this.astronaut.setLight(this.lampOn && this.traveller === 'astronaut');
+    this.astronaut.aimLight(first ? this.camera : null);
+    this.lander.update(real, daylight);
+    if (this.respawnTimer > 0) {
+      this.respawnTimer -= real;
+      if (this.respawnTimer <= 0 && this.fade) this.fade.style.opacity = '0';
+    }
     this.terrain.update(this.rig.mode === 'map' ? this.rig.mapCenter : this.camera.position);
     this.sky.update(this.camera.position, target);
     this.markers.update(this.camera, this.rig.mode === 'map', explorer.position, explorer.heading);
-    this.weather.update(dt, this.camera, explorer.position, this.conditions.windMs, storm, daylight, this.renderer.domElement.clientHeight, mapHeight);
+    this.weather.update(dt, this.camera, explorer.position, this.conditions.windMs, weather.windFromDeg, this.hour, storm, daylight, this.renderer.domElement.clientHeight, mapHeight);
     this.rocks.mesh.visible = this.rig.mode !== 'map';
     if (this.rig.mode !== 'map') this.rocks.update(explorer.position);
 
@@ -949,10 +1039,11 @@ export class Game {
     }
     if (this.hour >= 17.5 && this.hour < 18.5 && !this.sunsetWarned) {
       this.sunsetWarned = true;
-      this.hud.toast('Sunset is near: head back to base. Night falls to about -75 °C.');
+      this.hud.toast('Sunset is near: head back to base. Press F for lights.');
     }
     const cell = this.analysis.index(explorer.position.x, explorer.position.z);
-    const shield = this.camping ? CAMP_DOSE_FACTOR : 1;
+    const safe = this.inSafeZone;
+    const shield = this.camping || safe ? CAMP_DOSE_FACTOR : 1;
     this.doseTotal += (doseRate(this.analysis.skyView[cell]) * (this.conditions?.doseFactor ?? 1) * shield * missionSeconds) / 3600;
     const moved = Math.hypot(explorer.position.x - this.lastPosition.x, explorer.position.z - this.lastPosition.z);
     // Moving costs the Santee (on foot) or Carr (rover) energy for the slope actually covered. Standing costs the Apollo work rate;
@@ -960,8 +1051,13 @@ export class Game {
     const travelJ = moved > 1e-3 && missionSeconds > 0
       ? travelEnergyJ(this.traveller, moved, gradeDeg(explorer.position.y - this.lastPosition.y, moved), moved / missionSeconds)
       : 0;
-    if (this.traveller === 'astronaut') this.suitJ += travelJ || WORK_RATE_W * missionSeconds;
-    else this.energyWh += (travelJ || (this.camping ? 0 : MODEL.roverElectronics.value * missionSeconds)) / 3600;
+    if (this.traveller === 'astronaut') {
+      this.suitJ += (travelJ || WORK_RATE_W * missionSeconds) + (this.lampOn ? MODEL.helmetLamp.value * missionSeconds : 0);
+      // In the lander's safe zone the suit refills from the lander, as it does from a camped rover.
+      if (safe) this.suitJ = Math.max(0, this.suitJ - (SUIT_ENERGY_J * missionSeconds) / SUIT_REFILL_S - WORK_RATE_W * missionSeconds);
+      else if (this.suitJ >= SUIT_ENERGY_J) this.rescue();
+    } else this.energyWh += (travelJ || (this.camping ? 0 : MODEL.roverElectronics.value * missionSeconds)) / 3600;
+    if (this.headlightsOn) this.energyWh += (MODEL.roverLights.value * missionSeconds) / 3600;
     // The rover's panel charges its battery wherever it stands; a camped crew tops the suit up from the rover.
     const roverCell = this.analysis.index(this.rover.position.x, this.rover.position.z);
     const panelW = this.analysis.solarAt(roverCell, this.sunSample(this.hour, this.scenario)) * PANEL_W_PER_WM2;
@@ -997,7 +1093,7 @@ export class Game {
     const { x, z } = explorer.position;
     const cell = this.analysis.index(x, z);
     const slope = this.analysis.effectiveSlope(cell);
-    const { rating, reason } = rate(slope, this.analysis.roughness[cell], explorer.profile);
+    const { rating, reason } = rate(slope, this.analysis.roughness[cell], explorer.profile, this.analysis.coarse[cell]);
     const weather = this.environment.at(this.hour);
     const rover = this.traveller === 'rover';
     const reserve = rover ? 1 - this.energyWh / ROVER_BATTERY_WH : 1 - this.suitJ / SUIT_ENERGY_J;
@@ -1005,16 +1101,30 @@ export class Game {
     const conditions = this.conditions ?? assess(this.scenario, weather, space);
     const sun = this.sunSample(this.hour, this.scenario);
     const away = this.roverDistance();
+    const lit = rover ? this.headlightsOn : this.lampOn;
+    const dark = this.daylight < 0.6;
+    const { contingency } = this.tripContext();
+    const advice = advise(this.safety, {
+      conditions, rover, sheltered: this.camping || this.inSafeZone,
+      sunElevationDeg: weather.sunElevationDeg, airTempC: weather.airTempC,
+      shelterWalkS: contingency.slowS[cell], walkHomeJ: contingency.homeJ[cell], suitUsedJ: this.suitJ, slopeDeg: slope,
+    });
+    const prompts: Prompt[] = [];
+    if (!this.transfer) {
+      if (rover) prompts.push({ key: 'E', label: 'Leave rover', action: 'interact' }, { key: 'R', label: this.camping ? 'Break camp' : 'Camp', action: 'camp' });
+      else if (away <= BOARD_RANGE) prompts.push({ key: 'E', label: 'Enter rover', action: 'interact' });
+      // The lights prompt shows once it is getting dark, or while a light is on.
+      if (dark || lit) prompts.push({ key: 'F', label: lit ? 'Lights off' : 'Lights', action: 'lights' });
+    }
     this.hud.setTelemetry({
       panelW: this.analysis.solarAt(cell, sun) * PANEL_W_PER_WM2,
       panelDayKWh: ((this.analysis.solarDay?.[cell] ?? 0) * PANEL_W_PER_WM2) / 1000,
       inShadow: sun.wm2 > 0 && !this.analysis.sunlit(cell, sun.elevationDeg, sun.azimuthDeg),
       camping: this.camping,
+      safe: this.inSafeZone,
       battery: 1 - this.energyWh / ROVER_BATTERY_WH,
       cabinAirS: CABIN_AIR_S - this.cabinSeconds,
-      prompts: this.transfer ? []
-        : rover ? [{ key: 'E', label: 'Leave rover', action: 'interact' }, { key: 'R', label: this.camping ? 'Break camp' : 'Camp', action: 'camp' }]
-        : away <= BOARD_RANGE ? [{ key: 'E', label: 'Enter rover', action: 'interact' }] : [],
+      prompts,
       map: {
         half: this.site.local.half,
         you: { x, z, heading: explorer.heading },
@@ -1029,11 +1139,14 @@ export class Game {
       slopeDeg: slope, rating, reason,
       hour: this.hour, sol: this.sol,
       airTempC: weather.airTempC, groundTempC: weather.groundTempC, windMs: conditions.windMs,
-      doseRate: doseRate(this.analysis.skyView[cell]) * conditions.doseFactor * (this.camping ? CAMP_DOSE_FACTOR : 1),
+      windFromDeg: this.scenario === 'dust' ? null : weather.windFromDeg, tau: conditions.tau,
+      season: `Ls ${this.environment.season.lsDeg.toFixed(0)}° · ${this.environment.season.name}`,
+      doseRate: doseRate(this.analysis.skyView[cell]) * conditions.doseFactor * (this.camping || this.inSafeZone ? CAMP_DOSE_FACTOR : 1),
       doseTotal: this.doseTotal,
       reserve,
       spaceStatus: space.status, spaceHeadline: space.headline, spaceDetail: space.detail,
       guidance: this.guidance(),
+      advice,
     });
   }
 
@@ -1185,6 +1298,20 @@ export class Game {
       setLayer: (layer: LayerId) => this.setLayer(layer),
       setCamera: (mode: CameraMode) => this.setCamera(mode),
       setTimeScale: (scale: number) => this.setTimeScale(scale),
+      setHour: (hour: number) => {
+        this.hour = hour;
+        this.sunsetWarned = false;
+      },
+      setSuit: (reserve: number) => (this.suitJ = (1 - reserve) * SUIT_ENERGY_J),
+      setScenario: (scenario: Scenario) => {
+        this.scenario = scenario;
+        this.hud.setScenario(scenario);
+      },
+      /** Turn the explorer to a compass bearing (degrees clockwise from north), e.g. towards the sun. */
+      face: (bearingDeg: number, x = this.active.position.x, z = this.active.position.z) => {
+        const r = (bearingDeg * Math.PI) / 180;
+        this.active.place(x, z, Math.atan2(Math.sin(r), -Math.cos(r)));
+      },
       bestBase: () => this.scorer.findBest(),
       screenOf: (x: number, z: number) => {
         const v = new THREE.Vector3(x, this.site.groundAt(x, z), z).project(this.camera);
@@ -1208,8 +1335,13 @@ export class Game {
       routes: this.routes.length,
       hour: this.hour,
       sol: this.sol,
-      weather: { storm: this.storm, fog: (this.scene.fog as THREE.FogExp2).density, dustDevils: this.weather.devilsActive },
+      sun: { elevation: this.environment.at(this.hour).sunElevationDeg, azimuth: this.environment.at(this.hour).sunAzimuthDeg },
+      weather: { tau: this.tau, storm: this.storm, fog: (this.scene.fog as THREE.FogExp2).density, dustDevils: this.weather.devilsActive },
       doseTotal: this.doseTotal,
+      suit: 1 - this.suitJ / SUIT_ENERGY_J,
+      battery: 1 - this.energyWh / ROVER_BATTERY_WH,
+      lights: { lamp: this.lampOn, rover: this.headlightsOn },
+      safe: this.inSafeZone,
       player: {
         position: { x: explorer.position.x, y: explorer.position.y, z: explorer.position.z },
         speed: explorer.speed,

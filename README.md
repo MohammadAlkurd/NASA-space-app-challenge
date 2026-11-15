@@ -14,7 +14,7 @@ dose and suit energy. Visit the real science stops of Perseverance (Jezero) or C
 | --- | --- |
 | Layered, integrated view of a Martian location from multiple NASA missions | Switchable layers over two landing sites you can walk, Jezero and Gale, from Mars Reconnaissance Orbiter, Mars Odyssey, Mars Global Surveyor, Curiosity and Perseverance |
 | At least three kinds of data | Optical (HiRISE), topographic (HiRISE/MOLA), thermal (THEMIS), atmospheric (MEDA), radiation (RAD, DONKI) |
-| Astronaut safety, radiation and space weather | Dose rate and trip dose, shelter layer, low-radiation route, DONKI solar-storm status, suit-time budget, slope limits |
+| Astronaut safety, radiation and space weather | A "What to do now" card and a safety guide (press G) with the action, the reason and the sourced number for each hazard; dose rate and trip dose, shelter layer, low-radiation route, DONKI solar-storm status, suit-time budget, slope limits |
 | Suit mobility, route planning around obstacles | Separate limits for astronaut and rover; A* planner avoids no-go slopes; every risky stretch is explained |
 | Route map to science objectives | Real Perseverance and Curiosity science stops; the Science-rich route visits those on the way |
 | Point-of-view imagery from surface missions | The rover's own Navcam photo at each stop, with credit and link |
@@ -33,7 +33,7 @@ npm test           # Playwright end-to-end test (first time: npx playwright inst
 ```
 
 Controls: click the ground to plan a route, **Go** to follow it. `W A S D` / arrows to move by hand, drag to look,
-wheel to zoom, `M` map view, `C` helmet view.
+wheel to zoom, `M` map view, `C` helmet view, `E` enter or leave the rover, `F` lights, `G` safety guide, `Esc` pause and stats.
 
 ## Deploy (GitHub Pages)
 
@@ -54,6 +54,7 @@ All map data is pre-processed and committed under `public/data/`, so the build n
 | Radiation | RAD surface dose 0.67 mSv/day; Murray Buttes shielding | Hassler et al. 2014; Ehresmann et al. 2021 (MSL/RAD) |
 | Space weather | DONKI SEP and CME lists | NASA CCMC |
 | Science stops, traverse, photos | Mars 2020 mission map and raw image archive | NASA/JPL-Caltech |
+| Crew rover and astronaut models | Space Exploration Vehicle and Mark III Spacesuit, NASA 3D Resources (github.com/nasa/NASA-3D-Resources), reduced and with the logo removed | NASA |
 
 Measured vs. estimated values and model limits are listed in the in-app **Sources** panel (`src/ui/about.ts`).
 NASA does not endorse this project. No NASA logos are used.
@@ -65,6 +66,17 @@ python -m venv .venv && . .venv/bin/activate
 pip install -r pipeline/requirements.txt
 python pipeline/build_site.py jezero       # terrain + photo (reads the USGS GeoTIFFs over HTTP)
 python pipeline/build_mission.py jezero    # science stops, photos, weather, heat layer
+```
+
+The two models in `public/models/` are built from the NASA 3D Resources GLB files:
+
+```bash
+cd pipeline/models && npm install
+base="https://raw.githubusercontent.com/nasa/NASA-3D-Resources/master/3D%20Models"
+curl -L -o sev.glb "$base/Space%20Exploration%20Vehicle/Space%20Exploration%20Vehicle.glb"
+curl -L -o suit.glb "$base/Mark%20III%20Spacesuit/Mark%20III%20Spacesuit.glb"
+node build_rover.mjs sev.glb ../../public/models/rover.glb
+node build_suit.mjs suit.glb ../../public/models/astronaut.glb
 ```
 
 ## Project layout
