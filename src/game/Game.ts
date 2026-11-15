@@ -252,9 +252,9 @@ export class Game {
     this.rover.place(landing.x + ROVER_OFFSET.x, landing.z + ROVER_OFFSET.z, -Math.PI / 2);
     this.base = { x: landing.x, z: landing.z };
     this.markers.setBase(this.base);
-    this.analysis.signal = coverage(this.analysis, this.base);
     this.refreshSolarDay();
     this.placeLander();
+    this.analysis.signal = coverage(this.analysis, this.landerPoint);
     try {
       const saved = JSON.parse(localStorage.getItem(LIGHTS_KEY) ?? '{}');
       this.lampOn = Boolean(saved.lamp);
